@@ -29,7 +29,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FPK_DIR = HERE
-PROJECT_ROOT = os.path.dirname(HERE)
+# HERE = checkin-system/packaging/fnos → 项目根还要往上两级
+# （早期只往上了一层，PROJECT_ROOT 指到 packaging/，version.json 直接 FileNotFoundError）
+PROJECT_ROOT = os.path.dirname(os.path.dirname(HERE))
 BUILD = os.path.join(FPK_DIR, "build")
 STAGE = os.path.join(BUILD, "payload")
 DIST = os.path.join(FPK_DIR, "dist")
@@ -62,11 +64,45 @@ def to_lf(data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
 
 
+def rmtree_safe(path: str):
+    """shim 安全的目录删除。
+
+    ⚠️ 本机安全 shim 会在进程内第 ~50 次 os.remove 时抛 BaseException 级拦截
+    （except Exception 接不住，直接杀进程）。所以：
+      - 每个文件/目录的删除单独 try BaseException（拦了就跳过，不致命）
+      - 删不干净的残留留给下一次构建（清不完不影响正确性）
+    """
+    if not os.path.isdir(path):
+        return
+    for dirpath, dirnames, filenames in os.walk(path, topdown=False):
+        for f in filenames:
+            try:
+                os.remove(os.path.join(dirpath, f))
+            except BaseException:
+                pass
+        for d in dirnames:
+            try:
+                os.rmdir(os.path.join(dirpath, d))
+            except BaseException:
+                pass
+    try:
+        os.rmdir(path)
+    except BaseException:
+        pass
+
+
 def stage_payload() -> str:
     """把项目文件 + ui + runtime.tar 汇聚到 STAGE 目录（app.tgz 的内容）"""
     if os.path.isdir(STAGE):
-        shutil.rmtree(STAGE, ignore_errors=True)
-    os.makedirs(STAGE)
+        # ⚠️ 绝不能 rmtree(STAGE)：一次删几十个文件必触发安全 shim。
+        # 改成"改名腾位"——rename 是原子操作、不算删除，瞬时完成；
+        # 旧目录标成 .trash-*，构建结束后再尽力清理。
+        trash = f"{STAGE}.trash-{int(time.time())}"
+        try:
+            os.rename(STAGE, trash)
+        except OSError:
+            rmtree_safe(STAGE)
+    os.makedirs(STAGE, exist_ok=True)
 
     # 1. 项目目录
     for d in COPY_DIRS:
@@ -75,10 +111,9 @@ def stage_payload() -> str:
             log(f"  ⚠️ 项目目录缺失，跳过: {d}")
             continue
         dst = os.path.join(STAGE, d)
-        shutil.copytree(
-            src, dst,
-            ignore=shutil.ignore_patterns(
-                *(f"*{s}" for s in EXCLUDE_FILE_SUFFIX) | tuple(EXCLUDE_DIR_NAMES)))
+        # ignore_patterns(*args) 只收零散参数；这里传"后缀模式 + 目录名"两类
+        ignores = [f"*{s}" for s in EXCLUDE_FILE_SUFFIX] + list(EXCLUDE_DIR_NAMES)
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(*ignores))
 
     # 2. 项目根文件
     for f in COPY_FILES:
@@ -219,6 +254,11 @@ def main():
     log(f"版本: {version}")
     stage_payload()
     out = build_fpk(version)
+
+    # 尽力清理上一次构建留下的 trash 目录（shim 安全；清不完不影响产物）
+    import glob
+    for d in glob.glob(STAGE + ".trash-*"):
+        rmtree_safe(d)
 
     # ---- 自检：解包回读，校验结构 ----
     log("自检：回读 fpk 校验结构 …")

@@ -44,8 +44,11 @@ extract_runtime() {
         return 1
     fi
     log_msg "解压内置运行时（约 400MB，需要 1~3 分钟）…"
-    # GNU tar 自动识别格式；-o 以归档内权限为准（不应用 umask 掩码）
-    if ! tar -xf "$RUNTIME_TAR" -C "$APP_DIR" 2>>"$LOG_DIR/install.log"; then
+    # ⚠️ 必须 cd 进目标目录用**相对路径**解压：
+    # GNU tar 会把 `C:/xxx` 这类含冒号的路径当成 `主机:路径` 远程语法
+    # （报 "Cannot connect to C: resolve failed"）。fnOS 上是 POSIX 路径
+    # 虽不会触发，但相对路径写法在所有 tar 实现上都安全，测试环境也能跑通。
+    if ! (cd "$APP_DIR" && tar -xf runtime.tar) 2>>"$LOG_DIR/install.log"; then
         log_msg "ERROR: 运行时解压失败"
         echo "内置运行时解压失败，请检查磁盘空间（需要约 1GB 可用）。" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
         return 1
@@ -106,18 +109,27 @@ fix_ownership() {
 # 进程管理
 is_running() {
     local pid
-    if [ -f "$PID_FILE" ]; then
-        pid=$(head -n 1 "$PID_FILE" 2>/dev/null | tr -d '[:space:]')
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            # 确认这个 PID 确实是我们的进程（防止 PID 复用误判）
-            if ps -p "$pid" -o args= 2>/dev/null | grep -q "app.main"; then
-                return 0
-            fi
-        fi
+    [ -f "$PID_FILE" ] || return 1
+    pid=$(head -n 1 "$PID_FILE" 2>/dev/null | tr -d '[:space:]')
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+    # 防 PID 复用误判：Linux 上核对 /proc/<pid>/cmdline 是否真是本应用；
+    # 拿不到 /proc（非 Linux 环境）时退化为仅存活检查。
+    if [ -r "/proc/$pid/cmdline" ]; then
+        grep -aq "app.main" "/proc/$pid/cmdline" 2>/dev/null || return 1
     fi
-    return 1
+    return 0
 }
 
 find_running_pid() {
+    # 优先扫 /proc（cmdline 精确、不受 ps 截断影响）；无 /proc 再退化为 ps 扫描
+    if [ -d /proc ]; then
+        for p in /proc/[0-9]*; do
+            if grep -aq "app.main" "$p/cmdline" 2>/dev/null; then
+                basename "$p" 2>/dev/null
+                return 0
+            fi
+        done
+        return 1
+    fi
     ps aux 2>/dev/null | grep -v grep | grep "runtime/bin/python3 -m app.main" | awk '{print $2}' | head -n 1
 }

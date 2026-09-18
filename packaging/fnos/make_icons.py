@@ -85,8 +85,9 @@ def main():
         flag = "✓" if kb <= 1024 else "✗ 超过 1024KB"
         print(f"{name:16s} {size}x{size}  {kb:7.1f}KB  {flag}")
 
-    # 入口图标（ui/images/icon_{0}.png）
-    ui_dir = os.path.join(OUT_DIR, "app", "ui", "images")
+    # 入口图标（ui/images/icon_{0}.png）—— ⚠️ 位置必须与 build_fpk.py 的
+    # 拷贝源一致：payload/ui/images/（build_fpk 会把 payload/ui 整体拷进载荷）
+    ui_dir = os.path.join(OUT_DIR, "payload", "ui", "images")
     os.makedirs(ui_dir, exist_ok=True)
     for size in (64, 256):
         img = make_icon(size)

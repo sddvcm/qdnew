@@ -23,9 +23,10 @@ packaging/fnos/
 │   └── config_*          # 配置变更（占位）
 ├── wizard/install|uninstall  # 安装/卸载向导
 ├── payload/ui/           # 桌面入口（config + 图标），打进 app.tgz
-├── prepare_runtime.py    # 步骤1：下载运行时 tar + 依赖 wheel
-├── make_runtime_tgz.py   # 步骤2：流式改造出 runtime.tar（保留软链/+x）
-├── build_fpk.py          # 步骤3：组装 fpk + 结构自检
+├── download_runtime.py   # 步骤1：多源下载运行时 tar（ghfast 镜像兜底）
+├── fetch_wheels.py       # 步骤2：pip 解析 + 多源直拉全部依赖 wheel（断点续传）
+├── make_runtime_tgz.py   # 步骤3：流式改造出 runtime.tar（保留软链/+x）
+├── build_fpk.py          # 步骤4：组装 fpk + 结构自检
 └── build/                # 中间产物（已 gitignore）
     ├── python-runtime.tar.gz
     ├── wheels/
@@ -40,18 +41,12 @@ packaging/fnos/
 # 0. 依赖：Python 3.12+ 与 Pillow（生成图标用）
 pip install Pillow
 
-# 1. 下载运行时（多源自适应，~106MB）
+# 1. 下载运行时（多源自适应，~106MB；GitHub 直连卡死时自动换 ghfast 镜像）
 python packaging/fnos/download_runtime.py
 
-# 2. 下载全部依赖的 Linux x86_64 wheel
-#    ⚠️ 必须 --only-binary 且多平台标签（onnxruntime 需要 manylinux_2_28）
-python -m pip download \
-  --dest packaging/fnos/build/wheels \
-  --platform manylinux2014_x86_64 --platform manylinux_2_17_x86_64 \
-  --platform manylinux_2_27_x86_64 --platform manylinux_2_28_x86_64 \
-  --python-version 3.12 --implementation cp \
-  --only-binary=:all: --no-cache-dir \
-  -r requirements.txt
+# 2. 获取全部依赖 wheel（pip 解析出精确清单后多源直拉，含断点续传）
+#    ⚠️ 依赖 wheel 必须是 linux x86_64 的（onnxruntime 是 manylinux_2_28 标签）
+python packaging/fnos/fetch_wheels.py
 
 # 3. 生成图标（如未生成）
 python packaging/fnos/make_icons.py
@@ -63,6 +58,14 @@ python packaging/fnos/make_runtime_tgz.py
 python packaging/fnos/build_fpk.py
 # 输出 packaging/fnos/dist/checkin-system-<version>.fpk
 ```
+
+### 下载踩坑记录（换机器/换网络时可能复现）
+
+| 坑 | 现象 | 解法 |
+|---|---|---|
+| GitHub Release 资产 | 经 Clash 代理 15 分钟无响应头 | `download_runtime.py` 自动探测换 ghfast 镜像 |
+| pip 交叉模式 + 国内镜像 | tuna/tencent 返回 `versions: none` | `fetch_wheels.py` 用 pypi 官方解析 URL，再对文件本体多源直拉 |
+| files.pythonhosted.org 走代理 | 仅 ~60KB/s | **直连（绕过代理）实测 2.3MB/s**，脚本已把 direct 排在镜像之后、代理之前 |
 
 ## 为什么这样设计（关键决策，勿随意改动）
 
