@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}导入插件 - 签到管理系统{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 640px; margin: 0 auto;">
+  <div class="card-header">
+    <h2>导入签到插件</h2>
+  </div>
+
+  <div style="margin-bottom: 20px; padding: 16px; background: var(--primary-light); border-radius: var(--radius); font-size: 13px; color: var(--primary);">
+    <strong>提示：</strong>上传一个 Python 文件，其中包含继承自 <code>BasePlugin</code> 的签到插件类。
+    系统会自动注册到数据库并在前端展示对应的配置表单。
+  </div>
+
+  <div class="form-group">
+    <label>插件文件名</label>
+    <input type="text" id="pluginFilename" placeholder="my_checkin.py" value="">
+  </div>
+
+  <div class="form-group">
+    <label>插件代码 <span class="required">*</span></label>
+    <textarea id="pluginCode" rows="20" style="font-family: var(--mono); font-size: 12px;"
+      placeholder="粘贴完整的 Python 插件代码..."></textarea>
+    <div class="help-text">代码必须包含一个继承 <code>BasePlugin</code> 的类，并实现 <code>checkin()</code> 方法。</div>
+  </div>
+
+  <div class="form-group">
+    <label>或上传 .py 文件</label>
+    <input type="file" id="pluginFile" accept=".py" onchange="handleFileUpload(this)">
+  </div>
+
+  <div style="margin-top: 20px;">
+    <details>
+      <summary style="cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 12px;">查看插件模板</summary>
+      <pre style="background: var(--bg); padding: 16px; border-radius: var(--radius); font-size: 12px; overflow-x: auto; font-family: var(--mono); line-height: 1.5;">from plugins.base import BasePlugin, FormField, CheckinResult
+
+class MyCheckinPlugin(BasePlugin):
+    name = "my_checkin"
+    display_name = "我的签到插件"
+    description = "自定义签到"
+    plugin_type = "http"
+    author = "me"
+
+    form_schema = [
+        FormField(key="site_url", label="站点地址", type="url", required=True),
+        FormField(key="cookie", label="Cookie", type="textarea", required=True, sensitive=True),
+        FormField(key="retry", label="重试次数", type="number", default=3),
+    ]
+
+    def checkin(self, config):
+        params = config.get("params", {})
+        cookie = config.get("cookie", "") or params.get("cookie", "")
+
+        # TODO: 实现签到逻辑
+
+        return CheckinResult(
+            success=True,
+            message="签到成功",
+            extra={"points": 100}
+        )</pre>
+    </details>
+  </div>
+
+  <div class="modal-actions">
+    <a href="/" class="btn">取消</a>
+    <button class="btn btn-primary" onclick="importPlugin()">导入插件</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function handleFileUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('pluginFilename').value = file.name;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('pluginCode').value = e.target.result;
+  };
+  reader.readAsText(file);
+}
+
+async function importPlugin() {
+  const code = document.getElementById('pluginCode').value.trim();
+  const filename = document.getElementById('pluginFilename').value.trim() || 'custom_plugin.py';
+
+  if (!code) {
+    showToast('error', '请粘贴或上传插件代码');
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/plugins/import', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ code, filename }),
+    });
+    const data = await resp.json();
+    if (data.success) {
+      showToast('success', data.message);
+      setTimeout(() => location.href = '/task/add', 1000);
+    } else {
+      showToast('error', data.message);
+    }
+  } catch(e) {
+    showToast('error', '导入失败: ' + e.message);
+  }
+}
+</script>
+{% endblock %}

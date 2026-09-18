@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}系统设置 - 签到管理系统{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 820px; margin: 0 auto;">
+  <div class="card-header"><h2>系统设置</h2></div>
+
+  <div class="section-title">程序更新</div>
+
+  <div style="padding: 14px; background: var(--primary-light); border-radius: var(--radius);
+              font-size: 13px; color: var(--primary); line-height: 1.7; margin-bottom: 18px;">
+    更新源是一个 GitHub 仓库，其根目录需有 <code>update_manifest.json</code> 清单文件，
+    里面列出文件名与 SHA256。程序会比对版本号、逐个校验哈希后才写入，并自动备份旧文件。
+  </div>
+
+  <div class="form-group">
+    <label>更新源仓库</label>
+    <input type="text" id="source" value="{{ source }}"
+      placeholder="https://github.com/你的用户名/checkin-system">
+    <div class="help-text">
+      格式：<code>https://github.com/用户名/仓库名</code>，非默认分支加 <code>/tree/分支名</code>。
+      只允许 github.com 域下的地址。
+    </div>
+  </div>
+
+  <div class="modal-actions" style="justify-content: flex-start; gap: 8px;">
+    <button class="btn btn-primary" onclick="saveSource()">保存更新源</button>
+    <button class="btn" id="checkBtn" onclick="checkUpdate()">检查更新</button>
+  </div>
+
+  <div id="updateResult" style="display: none; margin-top: 18px;"></div>
+
+  <div class="form-group" style="margin-top: 22px;">
+    <label>当前版本</label>
+    <div id="curVersion" style="font-family: var(--mono); font-size: 13px;">读取中…</div>
+  </div>
+
+  <div class="form-group">
+    <label>发版辅助</label>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <input type="text" id="newVersion" placeholder="1.3.0" style="width: 110px;">
+      <input type="text" id="newNotes" placeholder="本次更新说明" style="flex: 1; min-width: 180px;">
+      <button class="btn btn-sm" onclick="downloadManifest()">下载清单</button>
+    </div>
+    <div class="help-text">
+      改完代码后：填上新版本号 → 下载 <code>update_manifest.json</code> →
+      连同改动一起提交到仓库根目录。之后在任意部署点「检查更新」即可拿到新版本。
+    </div>
+  </div>
+
+  <div class="section-title" style="margin-top: 26px;">历史备份</div>
+  <div id="backupList" style="font-size: 12px; color: var(--text-secondary);">读取中…</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const NEED_RESTART_HINT = '更新已写入，插件已重载。若涉及核心模块（app/、har/）的改动，' +
+  '建议重启容器以确保完全生效。';
+
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/update/status');
+    const d = await r.json();
+    const v = d.version || {};
+    document.getElementById('curVersion').textContent =
+      (v.version || '未知') + (v.released_at ? '  (发布于 ' + v.released_at + ')' : '') +
+      (v.notes ? '  — ' + v.notes : '');
+    if (!document.getElementById('source').value && d.source) {
+      document.getElementById('source').value = d.source;
+    }
+    const box = document.getElementById('backupList');
+    if (!d.backups || !d.backups.length) {
+      box.textContent = '暂无备份（每次更新前会自动备份）';
+    } else {
+      box.innerHTML = d.backups.map(b =>
+        `<div style="padding:4px 0; border-bottom:1px solid var(--border);">
+           <code>${esc(b.name)}</code> — ${b.files} 个文件
+           <span style="color:var(--text-muted);">(${esc(b.path)})</span>
+         </div>`).join('');
+    }
+  } catch(e) { /* 静默 */ }
+}
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function saveSource() {
+  const source = document.getElementById('source').value.trim();
+  const r = await fetch('/api/update/config', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({source}),
+  });
+  const d = await r.json();
+  if (d.success) {
+    document.getElementById('source').value = d.source;
+    showToast('success', '已保存');
+  } else {
+    showToast('error', d.message || '保存失败');
+  }
+}
+
+async function checkUpdate() {
+  const btn = document.getElementById('checkBtn');
+  btn.disabled = true; btn.textContent = '检查中…';
+  const box = document.getElementById('updateResult');
+  try {
+    const r = await fetch('/api/update/check', {method:'POST'});
+    const d = await r.json();
+    box.style.display = '';
+    if (d.message && !d.result) {
+      box.innerHTML = `<div class="alert-danger" style="padding:12px; border-radius:8px;
+        background:#fef2f2; color:#b91c1c; font-size:13px;">${esc(d.message)}</div>`;
+      return;
+    }
+    const res = d.result || {};
+    if (res.error) {
+      box.innerHTML = `<div style="padding:12px; border-radius:8px; background:#fef2f2;
+        color:#b91c1c; font-size:13px; white-space:pre-wrap;">${esc(res.error)}</div>`;
+      return;
+    }
+    if (!res.has_update) {
+      box.innerHTML = `<div style="padding:12px; border-radius:8px; background:#f0fdf4;
+        color:#15803d; font-size:13px;">
+        已是最新版本（当前 ${esc(res.current_version)}，远端 ${esc(res.latest_version)}）
+        </div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div style="padding:14px; border-radius:8px; background:#fffbeb;
+                  border:1px solid #fde68a; font-size:13px; line-height:1.8;">
+        <strong>发现新版本 ${esc(res.latest_version)}</strong>
+        <span style="color:var(--text-muted);">（当前 ${esc(res.current_version)}）</span><br>
+        ${res.released_at ? '发布日期：' + esc(res.released_at) + '<br>' : ''}
+        ${res.notes ? '更新说明：' + esc(res.notes) + '<br>' : ''}
+        包含 <strong>${res.file_count}</strong> 个文件
+        ${res.web_url ? '｜ <a href="' + esc(res.web_url) + '" target="_blank" rel="noopener">查看仓库</a>' : ''}
+        <div style="margin-top:12px;">
+          <button class="btn btn-primary btn-sm" id="doUpdateBtn" onclick="doUpdate()">
+            立即更新
+          </button>
+        </div>
+      </div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '检查更新';
+  }
+}
+
+async function doUpdate() {
+  if (!confirm('确定更新？程序会下载并覆盖部分代码文件。\n\n更新前会自动备份到 data/backups/，' +
+               '但仍建议确认更新源可信。')) return;
+  const btn = document.getElementById('doUpdateBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '更新中…'; }
+  try {
+    const r = await fetch('/api/update/run', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}',
+    });
+    const d = await r.json();
+    const res = d.result || {};
+    if (!d.success) {
+      showToast('error', d.message || '更新失败');
+      document.getElementById('updateResult').innerHTML =
+        `<div style="padding:12px; border-radius:8px; background:#fef2f2; color:#b91c1c;
+          font-size:13px; white-space:pre-wrap;">${esc(d.message || '更新失败')}</div>`;
+      return;
+    }
+    showToast('success', d.message);
+    document.getElementById('updateResult').innerHTML = `
+      <div style="padding:14px; border-radius:8px; background:#f0fdf4;
+                  border:1px solid #bbf7d0; font-size:13px; line-height:1.8;">
+        <strong>更新成功，当前版本 ${esc(res.version)}</strong><br>
+        写入 ${res.files.length} 个文件，备份在 <code>${esc(res.backup_dir)}</code><br>
+        <span style="color:#b45309;">${esc(NEED_RESTART_HINT)}</span>
+        ${d.reload_error ? '<br><span style="color:#b91c1c;">插件重载报错：' +
+          esc(d.reload_error) + '</span>' : ''}
+      </div>`;
+    loadStatus();
+  } catch(e) {
+    showToast('error', '更新请求失败：' + e.message);
+  } finally {
+    const b = document.getElementById('doUpdateBtn');
+    if (b) { b.disabled = false; b.textContent = '立即更新'; }
+  }
+}
+
+function downloadManifest() {
+  const v = document.getElementById('newVersion').value.trim();
+  const n = document.getElementById('newNotes').value.trim();
+  location.href = '/api/update/manifest?version=' + encodeURIComponent(v) +
+                  '&notes=' + encodeURIComponent(n);
+}
+
+loadStatus();
+</script>
+{% endblock %}

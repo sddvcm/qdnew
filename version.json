@@ -1,0 +1,7 @@
+{
+  "name": "checkin-system",
+  "version": "1.2.0",
+  "released_at": "2026-09-18",
+  "min_python": "3.10",
+  "notes": "新增 HAR 通用签到引擎；PushPlus 推送结果检测；云码 jfbym 验证码识别；程序内自动更新"
+}

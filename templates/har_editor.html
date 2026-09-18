@@ -1,0 +1,397 @@
+{% extends "base.html" %}
+{% block title %}{{ template.name }} - 模板编辑{% endblock %}
+
+{% block content %}
+<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap;">
+  <a href="/har" class="btn btn-sm">返回列表</a>
+  <h2 style="font-size: 16px; font-weight: 600; margin: 0;">{{ template.name }}</h2>
+  <span style="font-size: 12px; color: var(--text-muted);">{{ template.host }}</span>
+  <button class="btn btn-sm btn-primary" onclick="saveTemplate()">保存模板</button>
+  <button class="btn btn-sm" onclick="testTemplate()" id="testBtn">试跑一次</button>
+</div>
+
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start;">
+
+  <!-- 左栏：请求定义 -->
+  <div>
+    <div class="card">
+      <div class="card-header"><h2 style="font-size: 14px;">请求列表</h2></div>
+      <div class="help-text" style="margin-bottom: 10px;">
+        点击某个请求展开编辑。把固定值改成 <code>{{ '{{' }} 变量名 {{ '}}' }}</code> 这样的占位符即可变成变量。
+      </div>
+      <div id="entryList"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h2 style="font-size: 14px;">可用变量与函数</h2></div>
+      <div style="font-size: 12px; line-height: 1.9;">
+        <div style="margin-bottom: 8px;">
+          <strong>内置函数</strong>（直接写，无需参数）：<br>
+          <code>{{ '{{' }} 任意变量名 {{ '}}' }}</code>
+        </div>
+        <details>
+          <summary style="cursor:pointer; color: var(--text-secondary);">查看全部内置函数</summary>
+          <div id="builtinBox" style="margin-top: 8px; font-family: var(--mono); font-size: 11px; line-height: 2;"></div>
+        </details>
+        <details style="margin-top: 8px;">
+          <summary style="cursor:pointer; color: var(--text-secondary);">查看过滤器用法</summary>
+          <div style="margin-top: 8px; font-size: 12px; line-height: 1.9;">
+            <code>{{ '{{' }} 值 | 过滤器 {{ '}}' }}</code>，可串联：<br>
+            <code>{{ '{{' }} username | md5 | substr:0:8 {{ '}}' }}</code><br>
+            <div id="filterBox" style="margin-top: 8px; font-family: var(--mono); font-size: 11px; line-height: 2;"></div>
+          </div>
+        </details>
+        <details style="margin-top: 8px;">
+          <summary style="cursor:pointer; color: var(--text-secondary);">查看响应变量抽取写法</summary>
+          <div style="margin-top: 8px;">
+            在请求的「变量抽取」里填正则，抓到的东西就能在后面的请求里用
+            <code>{{ '{{' }} 变量名 {{ '}}' }}</code> 引用。
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右栏：试跑结果 -->
+  <div>
+    <div class="card">
+      <div class="card-header"><h2 style="font-size: 14px;">模板设置</h2></div>
+      <div class="form-group">
+        <label>模板名称</label>
+        <input type="text" id="tplName" value="{{ template.name | e }}">
+      </div>
+      <div class="form-group">
+        <label>备注</label>
+        <input type="text" id="tplNote" value="{{ (template.note or '') | e }}">
+      </div>      <div class="form-group">
+        <label>任务变量默认值</label>
+        <div class="help-text" style="margin-bottom: 8px;">
+          这里填的值会作为新建任务时的默认值。留空则任务里必须自己填。
+        </div>
+        <div id="varBox"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2 style="font-size: 14px;">试跑结果</h2>
+        <div style="font-size: 12px; color: var(--text-muted);" id="testStatus"></div>
+      </div>
+      <div class="help-text" style="margin-bottom: 10px;">
+        「试跑」会**真实发起请求**。请先在上面把变量填成真实值再跑。
+      </div>
+      <pre id="testLog" style="background: var(--bg); padding: 12px; border-radius: var(--radius);
+        font-size: 11px; font-family: var(--mono); max-height: 480px; overflow: auto;
+        white-space: pre-wrap; word-break: break-all; line-height: 1.6;">（点「试跑一次」后这里显示执行日志）</pre>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{# ⚠️ 整段 JS 用 {% raw %} 包住：这块代码里到处是 `{{ }}` 模板语法的字面展示
+   （提示文案、示例），不 raw 的话 Jinja2 会把它们当自己的表达式解析，
+   轻则渲染错乱，重则 TemplateSyntaxError 直接 500。 #}
+{% raw %}
+<script>
+const TPL_ID = __TPL_ID__;
+let entries = __ENTRIES__;
+let variables = __VARIABLES__;
+
+const BUILTINS = {
+  timestamp: '当前秒级时间戳', timestamp_ms: '当前毫秒时间戳',
+  date_time: '当前时间字符串', uuid: '随机 UUID',
+  random_num: '随机数字（可指定长度）', random_str: '随机字符串',
+  randint: '区间内随机整数', md5: 'MD5 摘要', sha1: 'SHA1 摘要',
+  sha256: 'SHA256 摘要', hmac_sha256: 'HMAC-SHA256', base64: 'Base64 编码',
+  base64_decode: 'Base64 解码', urlencode: 'URL 编码', int: '转整数',
+};
+const FILTERS = {
+  substr: "substr:起:止 —— 截取，{{ '{{' }} a | substr:0:8 {{ '}}' }}",
+  slice: 'slice 同 substr', replace: "replace:'旧':'新' —— 替换",
+  regex_replace: 'regex_replace:正则:替换 —— 正则替换',
+  regex_search: 'regex_search:正则 —— 取第一个捕获组',
+  regex_findall: 'regex_findall:正则 —— 取全部匹配',
+  get_cookie_value: "get_cookie_value:'名' —— 从 Cookie 串里取值",
+  json: "json:'a.b.c' —— 按路径取 JSON 字段",
+  length: 'length —— 长度', default: "default:'兜底值' —— 空值兜底",
+  upper: 'upper —— 转大写', lower: 'lower —— 转小写', strip: 'strip —— 去首尾空格',
+};
+
+document.getElementById('builtinBox').innerHTML =
+  Object.entries(BUILTINS).map(([k, v]) =>
+    `<div><code>{{ '{{' }} ${k} {{ '}}' }}</code> <span style="color:var(--text-muted);">${esc(v)}</span></div>`
+  ).join('');
+document.getElementById('filterBox').innerHTML =
+  Object.entries(FILTERS).map(([k, v]) =>
+    `<div><code>${esc(v)}</code></div>`
+  ).join('');
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ==================== 请求列表渲染 ====================
+
+function renderEntries() {
+  const box = document.getElementById('entryList');
+  box.innerHTML = entries.map((en, i) => {
+    const req = en.request || {};
+    const rule = en.rule || {};
+    const sa = (rule.success_asserts || []).map(a => a.re).filter(Boolean);
+    const fa = (rule.failed_asserts || []).map(a => a.re).filter(Boolean);
+    const ev = (rule.extract_variables || []).map(a => a.name).filter(Boolean);
+
+    const badges = [];
+    if (sa.length) badges.push(`<span class="badge badge-success" style="font-size:10px;">成功断言 ${sa.length}</span>`);
+    if (fa.length) badges.push(`<span class="badge badge-danger" style="font-size:10px;">失败断言 ${fa.length}</span>`);
+    if (ev.length) badges.push(`<span class="badge badge-warning" style="font-size:10px;">抽取 ${ev.join('/')}</span>`);
+
+    return `
+    <div style="border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 10px; overflow: hidden;">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--bg); cursor: pointer;"
+           onclick="toggleEntry(${i})">
+        <input type="checkbox" ${en.checked ? 'checked' : ''} onclick="event.stopPropagation()"
+          onchange="entries[${i}].checked = this.checked">
+        <span class="badge ${req.method === 'GET' ? 'badge-neutral' : 'badge-warning'}"
+          style="font-family:var(--mono);font-size:11px;">${esc(req.method || 'GET')}</span>
+        <span style="flex:1; font-family: var(--mono); font-size: 11px; word-break: break-all; min-width: 0;">
+          ${esc((req.url || '').slice(0, 70))}${(req.url || '').length > 70 ? '…' : ''}
+        </span>
+        ${badges.join('')}
+        <span style="color: var(--text-muted); font-size: 12px;" id="arrow-${i}">▸</span>
+      </div>
+
+      <div id="entry-${i}" style="display: none; padding: 12px; border-top: 1px solid var(--border);">
+        <div class="form-group">
+          <label style="font-size: 12px;">Method</label>
+          <select onchange="entries[${i}].request.method = this.value" style="font-size: 12px;">
+            ${['GET','POST','PUT','DELETE','PATCH','HEAD'].map(m =>
+              `<option value="${m}" ${req.method === m ? 'selected' : ''}>${m}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label style="font-size: 12px;">URL</label>
+          <textarea rows="2" style="font-family: var(--mono); font-size: 11px;"
+            onchange="entries[${i}].request.url = this.value">${esc(req.url || '')}</textarea>
+          <div class="help-text">把会变的部分改成变量，例如 <code>https://{{ '{{' }} site_url {{ '}}' }}/api/sign?t={{ '{{' }} timestamp {{ '}}' }}</code></div>
+        </div>
+
+        ${renderHeaderEditor(i, req)}
+        ${renderBodyEditor(i, req)}
+        ${renderRuleEditor(i, rule)}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderHeaderEditor(i, req) {
+  const headers = req.headers || [];
+  return `
+  <div class="form-group">
+    <label style="font-size: 12px;">请求头（每行一条 <code>名称: 值</code>）</label>
+    <textarea rows="4" style="font-family: var(--mono); font-size: 11px;"
+      onchange="updateHeaders(${i}, this.value)"
+      placeholder="Content-Type: application/x-www-form-urlencoded&#10;X-Requested-With: XMLHttpRequest">${
+      esc(headers.map(h => `${h.name}: ${h.value}`).join('\n'))
+    }</textarea>
+    <div class="help-text">Cookie 不用写在这里，勾选下面的 Cookie 变量即可</div>
+  </div>`;
+}
+
+function renderBodyEditor(i, req) {
+  return `
+  <div class="form-group">
+    <label style="font-size: 12px;">请求体</label>
+    <textarea rows="3" style="font-family: var(--mono); font-size: 11px;"
+      onchange="entries[${i}].request.data = this.value"
+      placeholder="uid={{ '{{' }} username {{ '}}' }}&pwd={{ '{{' }} password {{ '}}' }}">${esc(req.data || '')}</textarea>
+  </div>`;
+}
+
+function renderRuleEditor(i, rule) {
+  const sa = (rule.success_asserts || []).map(a => a.re).join('\n');
+  const fa = (rule.failed_asserts || []).map(a => a.re).join('\n');
+  const ev = (rule.extract_variables || []).map(a => `${a.name}=${a.re}`).join('\n');
+  return `
+  <div class="form-group">
+    <label style="font-size: 12px;">成功断言（每行一个正则，命中任意一条即算成功）</label>
+    <textarea rows="2" style="font-family: var(--mono); font-size: 11px;"
+      onchange="updateAsserts(${i}, 'success_asserts', this.value)"
+      placeholder="签到成功">${esc(sa)}</textarea>
+  </div>
+  <div class="form-group">
+    <label style="font-size: 12px;">失败断言（每行一个正则，命中任意一条即算失败）</label>
+    <textarea rows="2" style="font-family: var(--mono); font-size: 11px;"
+      onchange="updateAsserts(${i}, 'failed_asserts', this.value)"
+      placeholder="已签到|请先登录">${esc(fa)}</textarea>
+  </div>
+  <div class="form-group">
+    <label style="font-size: 12px;">变量抽取（每行 <code>变量名=正则</code>）</label>
+    <textarea rows="2" style="font-family: var(--mono); font-size: 11px;"
+      onchange="updateExtract(${i}, this.value)"
+      placeholder="formhash=name=&quot;formhash&quot; value=&quot;(\\w+)&quot;">${esc(ev)}</textarea>
+    <div class="help-text">抽出来的变量可以在后续请求里用 <code>{{ '{{' }} 变量名 {{ '}}' }}</code> 引用</div>
+  </div>`;
+}
+
+function toggleEntry(i) {
+  const box = document.getElementById('entry-' + i);
+  const arrow = document.getElementById('arrow-' + i);
+  const open = box.style.display !== 'none';
+  box.style.display = open ? 'none' : '';
+  arrow.textContent = open ? '▸' : '▾';
+}
+
+function updateHeaders(i, text) {
+  const out = [];
+  text.split('\n').forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    const idx = line.indexOf(':');
+    if (idx <= 0) return;
+    out.push({ name: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim(), checked: true });
+  });
+  entries[i].request.headers = out;
+}
+
+function updateAsserts(i, key, text) {
+  entries[i].rule[key] = text.split('\n')
+    .map(s => s.trim()).filter(Boolean)
+    .map(re => ({ re, from: 'content' }));
+}
+
+function updateExtract(i, text) {
+  const out = [];
+  text.split('\n').forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    const idx = line.indexOf('=');
+    if (idx <= 0) return;
+    out.push({ name: line.slice(0, idx).trim(), re: line.slice(idx + 1).trim(), from: 'content' });
+  });
+  entries[i].rule.extract_variables = out;
+}
+
+// ==================== 变量表单 ====================
+
+function renderVars() {
+  const box = document.getElementById('varBox');
+  if (!variables.length) {
+    box.innerHTML = '<div style="color: var(--text-muted); font-size: 12px;">' +
+      '还没有变量。在请求里用 <code>{{ \'{{\' }} 变量名 {{ \'}}\' }}</code> 后保存即可自动识别。</div>';
+    return;
+  }
+  box.innerHTML = variables.map((v, i) => `
+    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
+      <span style="font-family: var(--mono); font-size: 12px; min-width: 100px;">{{ '{{' }} ${esc(v)} {{ '}}' }}</span>
+      <input type="text" data-var="${esc(v)}" placeholder="默认值（可留空）"
+        style="flex: 1; font-size: 12px;" onchange="onVarInput(this)">
+      <button class="btn btn-xs btn-danger" onclick="removeVar(${i})" title="移除">×</button>
+    </div>`).join('');
+}
+
+let varDefaults = {};
+
+function onVarInput(el) {
+  varDefaults[el.dataset.var] = el.value;
+}
+
+function removeVar(i) {
+  const name = variables[i];
+  variables.splice(i, 1);
+  delete varDefaults[name];
+  renderVars();
+}
+
+// ==================== 保存 / 试跑 ====================
+
+async function saveTemplate() {
+  // 同步一下变量列表（从请求里重新推断）
+  try {
+    const resp = await fetch('/api/har/variables', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ entries }),
+    });
+    const data = await resp.json();
+    const detected = data.variables || [];
+    // 保留用户手动加进去的（当前 variables 里有、但请求里没有的）
+    const kept = variables.filter(v => !detected.includes(v));
+    variables = detected.concat(kept);
+  } catch(e) { /* 推断失败就用原列表 */ }
+  renderVars();
+
+  const payload = {
+    name: document.getElementById('tplName').value.trim() || '未命名模板',
+    note: document.getElementById('tplNote').value.trim(),
+    entries,
+    variables,
+  };
+
+  try {
+    const resp = await fetch('/api/har/' + TPL_ID, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (data.success) showToast('success', '模板已保存');
+    else showToast('error', data.message || '保存失败');
+  } catch(e) {
+    showToast('error', '保存失败：' + e.message);
+  }
+}
+
+async function testTemplate() {
+  const btn = document.getElementById('testBtn');
+  const log = document.getElementById('testLog');
+  btn.disabled = true;
+  btn.textContent = '执行中…';
+  document.getElementById('testStatus').textContent = '';
+  log.textContent = '正在执行，请稍候…';
+
+  // 收集变量当前值
+  const vars = {};
+  document.querySelectorAll('[data-var]').forEach(el => { vars[el.dataset.var] = el.value; });
+
+  try {
+    const resp = await fetch('/api/har/' + TPL_ID + '/test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ variables: vars }),
+    });
+    const data = await resp.json();
+    const ok = data.success;
+    document.getElementById('testStatus').innerHTML = ok
+      ? '<span class="badge badge-success">成功</span>'
+      : '<span class="badge badge-danger">失败</span>';
+    let text = '结果: ' + (data.message || '') + '\n';
+    text += '请求数: ' + (data.steps || 0) + '\n';
+    if (data.variables && Object.keys(data.variables).length) {
+      text += '\n抽取到的变量:\n';
+      Object.entries(data.variables).forEach(([k, v]) => {
+        text += '  ' + k + ' = ' + String(v).slice(0, 200) + '\n';
+      });
+    }
+    text += '\n----------- 执行日志 -----------\n' + (data.logs || '');
+    log.textContent = text;
+    showToast(ok ? 'success' : 'error', data.message || (ok ? '试跑成功' : '试跑失败'));
+  } catch(e) {
+    log.textContent = '请求出错: ' + e.message;
+    showToast('error', '试跑失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '试跑一次';
+  }
+}
+
+// ==================== 初始化 ====================
+renderEntries();
+renderVars();
+</script>
+{% endraw %}
+{% endblock %}

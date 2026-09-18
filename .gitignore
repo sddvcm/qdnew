@@ -1,0 +1,51 @@
+# ===== 绝对不要提交的东西 =====
+# 加密密钥（泄露 = 数据库里的密码/Cookie 可被解密）
+.env
+
+# SQLite 数据库（含任务配置、加密后的账号密码、签到记录）
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# 用户自己导入的插件（属于个人配置，不是项目代码）
+user_plugins/*.py
+!user_plugins/__init__.py
+
+# 日志
+logs/
+*.log
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 测试临时产物
+__har_test/*.txt
+__ref_*/
+__verify_*/
+
+# 本地凭据（推送用的 token 等）
+GitHub API.txt
+gh_token.txt
+token.txt

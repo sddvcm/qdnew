@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}HAR 模板 - 签到管理系统{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <h2>HAR 模板</h2>
+    <div class="actions">
+      <a href="/har/new" class="btn btn-primary">导入新模板</a>
+    </div>
+  </div>
+
+  <div style="padding: 14px 0 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.7;">
+    <strong>怎么用：</strong>浏览器 F12 → Network → 勾选「保留日志」→ 手动签到一次 →
+    右键请求 → 「另存为带内容的 HAR」→ 在下面导入。<br>
+    然后把用户名/密码/Cookie 改成 <code>{{ '{{' }} username {{ '}}' }}</code> 这样的变量，
+    填好「成功断言」正则，就能配成定时任务了 —— 全程不用写代码。
+  </div>
+
+  {% if templates %}
+  <div style="overflow-x: auto;">
+    <table style="min-width: 900px;">
+      <thead>
+        <tr>
+          <th style="min-width: 200px;">模板名</th>
+          <th style="min-width: 160px;">站点</th>
+          <th style="min-width: 90px;">请求数</th>
+          <th style="min-width: 200px;">变量</th>
+          <th style="min-width: 90px;">使用中</th>
+          <th style="min-width: 160px;">更新时间</th>
+          <th style="min-width: 220px;">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in templates %}
+        <tr id="tpl-row-{{ t.id }}">
+          <td style="font-weight: 500;">{{ t.name }}</td>
+          <td style="font-size: 12px; color: var(--text-muted);">{{ t.host or '-' }}</td>
+          <td>{{ t.request_count }}</td>
+          <td>
+            {% if t.variables %}
+            <span style="font-size: 12px; font-family: var(--mono); color: var(--text-secondary);">
+              {{ t.variables | join(', ') }}
+            </span>
+            {% else %}<span style="color: var(--text-muted); font-size: 12px;">无</span>{% endif %}
+          </td>
+          <td>
+            {% if t.task_count %}
+            <span class="badge badge-success">{{ t.task_count }} 个任务</span>
+            {% else %}
+            <span class="badge badge-neutral">未使用</span>
+            {% endif %}
+          </td>
+          <td style="font-size: 12px; color: var(--text-muted);">{{ (t.updated_at or '')[:16] }}</td>
+          <td>
+            <div class="actions">
+              <a href="/har/{{ t.id }}/edit" class="btn btn-xs btn-primary">编辑</a>
+              <a href="/api/har/{{ t.id }}/export" class="btn btn-xs">下载</a>
+              <button class="btn btn-xs btn-danger"
+                onclick="deleteTemplate({{ t.id }}, '{{ t.name }}')">删除</button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p>还没有 HAR 模板</p>
+    <a href="/har/new" class="btn btn-primary">导入第一个抓包文件</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function deleteTemplate(id, name) {
+  if (!confirm('确定删除模板「' + name + '」吗？此操作不可撤销。')) return;
+  try {
+    const resp = await fetch('/api/har/' + id, { method: 'DELETE' });
+    const data = await resp.json();
+    if (data.success) {
+      document.getElementById('tpl-row-' + id)?.remove();
+      showToast('success', '已删除');
+    } else {
+      showToast('error', data.message || '删除失败');
+    }
+  } catch(e) {
+    showToast('error', '删除失败：' + e.message);
+  }
+}
+</script>
+{% endblock %}

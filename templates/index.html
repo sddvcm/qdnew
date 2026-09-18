@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}任务列表 - 签到管理系统{% endblock %}
+
+{% block content %}
+<div class="stats-grid" id="statsGrid">
+  <div class="stat-card"><div class="stat-label">总任务数</div><div class="stat-value" id="statTotal">-</div></div>
+  <div class="stat-card"><div class="stat-label">启用中</div><div class="stat-value success" id="statEnabled">-</div></div>
+  <div class="stat-card"><div class="stat-label">异常任务</div><div class="stat-value danger" id="statError">-</div></div>
+  <div class="stat-card"><div class="stat-label">今日签到成功</div><div class="stat-value success" id="statToday">-</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>签到任务列表</h2>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="location.href='/task/add'">添加任务</button>
+      <button class="btn" onclick="location.href='/plugin/import'">导入插件</button>
+    </div>
+  </div>
+
+  <div style="overflow-x: auto;">
+    <table id="taskTable" style="min-width: 1100px;">
+      <thead>
+        <tr>
+          <th style="min-width: 180px;">名称 / 地址</th>
+          <th style="min-width: 100px;">用户名</th>
+          <th style="min-width: 110px;">密码</th>
+          <th style="min-width: 80px;">Cookie</th>
+          <th style="min-width: 90px;">状态</th>
+          <th style="min-width: 130px;">最近签到</th>
+          <th style="min-width: 180px;">定时 / 下次</th>
+          <th style="min-width: 180px;">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if tasks %}
+        {% for task in tasks %}
+        <tr id="task-row-{{ task.id }}">
+          <td>
+            <div style="font-weight: 500;">{{ task.name }}</div>
+            <div style="font-size: 11px; color: var(--text-muted);">{{ task.site_url or task.plugin_display_name }}</div>
+          </td>
+          <td>{{ task.username or '-' }}</td>
+          <td>
+            {% if task.password %}
+            <span class="password-wrapper" style="display: inline-flex; align-items: center; gap: 6px; min-width: 90px;">
+              <input type="password" value="{{ task.password }}" readonly style="border: none; background: transparent; width: 70px; padding: 4px 8px; font-size: 13px; cursor: default;" onclick="togglePassword(this)">
+              <button class="password-toggle" onclick="togglePasswordBtn(this)" title="显示密码" style="position: static; transform: none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </span>
+            {% else %}-{% endif %}
+          </td>
+          <td>
+            {% if task.cookie %}
+            <span class="badge badge-success">已设置</span>
+            {% elif task.params and task.params.get('cookie') %}
+            <span class="badge badge-success">已设置</span>
+            {% else %}
+            <span class="badge badge-neutral">未设置</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if task.status == 'normal' %}
+            <span class="badge badge-success"><span class="status-dot success"></span> 正常</span>
+            {% elif task.status == 'error' %}
+            <span class="badge badge-danger"><span class="status-dot danger"></span> 异常</span>
+            {% elif task.status == 'expired' %}
+            <span class="badge badge-warning"><span class="status-dot warning"></span> 过期</span>
+            {% else %}
+            <span class="badge badge-neutral"><span class="status-dot" style="background:var(--text-muted)"></span> 未启用</span>
+            {% endif %}
+            {% if task.status_message %}
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">{{ task.status_message[:30] }}</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if task.last_run_at %}
+            <div style="font-size: 12px; white-space: nowrap;">{{ task.last_run_at[:16] }}</div>
+            <div style="margin-top: 2px;">
+              <span class="badge {{ 'badge-success' if task.last_result == 'success' else 'badge-danger' }}" style="font-size: 10px; white-space: nowrap;">
+                {{ '成功' if task.last_result == 'success' else '失败' }}
+              </span>
+            </div>
+            {% else %}
+            <span style="color: var(--text-muted); font-size: 12px;">未运行</span>
+            {% endif %}
+          </td>
+          <td>
+            <div style="font-size: 12px; white-space: nowrap;">Cron: {{ task.cron_expr }}</div>
+            <div style="font-size: 11px; color: var(--text-muted); white-space: nowrap;">
+              下次: {{ task.next_run_str or '待计算' }}
+            </div>
+          </td>
+          <td>
+            <div class="actions">
+              <button class="btn btn-xs btn-primary" onclick="runTask({{ task.id }})">签到</button>
+              <a href="/task/{{ task.id }}" class="btn btn-xs">详情</a>
+              <a href="/task/{{ task.id }}/edit" class="btn btn-xs">编辑</a>
+              <button class="btn btn-xs btn-danger" onclick="deleteTask({{ task.id }}, '{{ task.name }}')">删除</button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr><td colspan="8" class="empty-state"><p>还没有签到任务</p><a href="/task/add" class="btn btn-primary">添加第一个任务</a></td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadStats() {
+  try {
+    const resp = await fetch('/api/system/stats');
+    const data = await resp.json();
+    document.getElementById('statTotal').textContent = data.total_tasks;
+    document.getElementById('statEnabled').textContent = data.enabled_tasks;
+    document.getElementById('statError').textContent = data.error_tasks;
+    document.getElementById('statToday').textContent = data.today_success + '/' + data.today_checkins;
+  } catch(e) {}
+}
+
+async function runTask(id) {
+  try {
+    const resp = await fetch(`/api/tasks/${id}/run`, { method: 'POST' });
+    const data = await resp.json();
+    showToast(data.success ? 'success' : 'error',
+      data.success ? '签到成功: ' + data.message : '签到失败: ' + data.message);
+    setTimeout(() => location.reload(), 1500);
+  } catch(e) {
+    showToast('error', '请求失败');
+  }
+}
+
+async function deleteTask(id, name) {
+  if (!confirm('确定要删除任务 "' + name + '" 吗？此操作不可撤销。')) return;
+  try {
+    const resp = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+    if (resp.ok) {
+      document.getElementById('task-row-' + id)?.remove();
+      showToast('success', '已删除');
+      loadStats();
+    }
+  } catch(e) { showToast('error', '删除失败'); }
+}
+
+loadStats();
+</script>
+{% endblock %}

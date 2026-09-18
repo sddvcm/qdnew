@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}添加任务 - 签到管理系统{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 640px; margin: 0 auto;">
+  <div class="card-header">
+    <h2>{% if task %}编辑任务{% else %}添加签到任务{% endif %}</h2>
+  </div>
+
+  <form id="taskForm">
+    {% if task %}<input type="hidden" id="taskId" value="{{ task.id }}">{% endif %}
+
+    <div class="form-group">
+      <label>选择插件 <span class="required">*</span></label>
+      <select id="pluginSelect" name="plugin_id" required {% if task %}disabled{% endif %}>
+        <option value="">-- 请选择签到插件 --</option>
+        {% for p in plugins %}
+        <option value="{{ p.id }}" data-type="{{ p.plugin_type }}"
+          {% if task and task.plugin_id == p.id %}selected{% endif %}>
+          {{ p.display_name }} ({{ p.plugin_type }})
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>任务名称 <span class="required">*</span></label>
+      <input type="text" id="taskName" name="name" required
+        value="{{ task.name if task else '' }}"
+        placeholder="例如：福利吧每日签到">
+    </div>
+
+    <div class="form-group">
+      <label>站点地址</label>
+      <input type="url" id="siteUrl" name="site_url"
+        value="{{ task.site_url if task else '' }}"
+        placeholder="https://www.wnflb2023.com">
+    </div>
+
+    <div class="form-group">
+      <label>用户名</label>
+      <input type="text" id="username" name="username"
+        value="{{ task.username if task else '' }}">
+    </div>
+
+    <div class="form-group">
+      <label>密码</label>
+      <div class="password-wrapper">
+        <input type="password" id="password" name="password"
+          value="{{ task.password if task else '' }}">
+        <button type="button" class="password-toggle" onclick="togglePasswordBtn(this)" title="显示密码">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Cookie</label>
+      <textarea id="cookie" name="cookie"
+        placeholder="从浏览器 F12 开发者工具复制完整的 Cookie 字符串">{{ task.cookie if task else '' }}</textarea>
+      <div class="help-text">选填：填 Cookie 可直接签到；不填则可用上方「用户名+密码」自动登录，登录成功后 Cookie 会自动保存并复用</div>
+    </div>
+
+    <div class="section-title">定时设置</div>
+
+    <div class="form-group">
+      <label>Cron 表达式</label>
+      <input type="text" id="cronExpr" name="cron_expr"
+        value="{{ task.cron_expr if task else '0 9 * * *' }}"
+        placeholder="分 时 日 月 周">
+      <div class="cron-presets">
+        <button type="button" class="cron-preset" data-cron="0 8 * * *">每天 08:00</button>
+        <button type="button" class="cron-preset active" data-cron="0 9 * * *">每天 09:00</button>
+        <button type="button" class="cron-preset" data-cron="0 12 * * *">每天 12:00</button>
+        <button type="button" class="cron-preset" data-cron="0 9 * * 1-5">工作日 09:00</button>
+        <button type="button" class="cron-preset" data-cron="0 */6 * * *">每6小时</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>
+        <input type="checkbox" id="enabled" name="enabled" value="1"
+          {% if task is none or task.enabled %}checked{% endif %}>
+        启用此任务
+      </label>
+    </div>
+
+    <div id="dynamicFields"></div>
+
+    <div class="modal-actions">
+      <a href="/" class="btn">取消</a>
+      <button type="submit" class="btn btn-primary">
+        {% if task %}保存修改{% else %}创建任务{% endif %}
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const isEdit = {{ 'true' if task else 'false' }};
+const taskData = {{ task | tojson | safe if task else 'null' }};
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('pluginSelect').addEventListener('change', loadPluginSchema);
+  document.querySelectorAll('.cron-preset').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.getElementById('cronExpr').value = this.dataset.cron;
+      document.querySelectorAll('.cron-preset').forEach(b => b.classList.remove('active'));
+      this.classList.add('active');
+    });
+  });
+
+  if (isEdit && taskData) {
+    loadPluginSchema();
+  }
+});
+
+async function loadPluginSchema() {
+  const pluginId = document.getElementById('pluginSelect').value;
+  if (!pluginId) { document.getElementById('dynamicFields').innerHTML = ''; return; }
+
+  try {
+    const resp = await fetch(`/api/plugins/${pluginId}/schema`);
+    const schema = await resp.json();
+    renderDynamicFields(schema);
+  } catch(e) {
+    document.getElementById('dynamicFields').innerHTML = '';
+  }
+}
+
+function renderDynamicFields(schema) {
+  const container = document.getElementById('dynamicFields');
+  if (!schema || !schema.length) { container.innerHTML = ''; return; }
+
+  // 通用字段已经在表单上面了，插件专属参数里跳过这些
+  const commonFields = ['cookie', 'username', 'password', 'site_url'];
+
+  let html = '';
+  const params = (taskData && taskData.params) ? taskData.params : {};
+  let hasFields = false;
+
+  schema.forEach(field => {
+    if (commonFields.includes(field.key)) return;
+    hasFields = true;
+
+    const val = params[field.key] !== undefined ? params[field.key] : (field.default || '');
+    const required = field.required ? '<span class="required">*</span>' : '';
+    const help = field.help_text ? `<div class="help-text">${field.help_text}</div>` : '';
+
+    html += `<div class="form-group"><label>${field.label} ${required}</label>`;
+
+    if (field.type === 'textarea') {
+      html += `<textarea name="param_${field.key}" placeholder="${field.placeholder || ''}" data-sensitive="${field.sensitive || false}">${val}</textarea>`;
+    } else if (field.type === 'select') {
+      html += `<select name="param_${field.key}">`;
+      field.options.forEach(opt => {
+        html += `<option value="${opt.value}" ${val == opt.value ? 'selected' : ''}>${opt.label}</option>`;
+      });
+      html += `</select>`;
+    } else if (field.type === 'checkbox') {
+      html += `<label style="font-weight: 400;"><input type="checkbox" name="param_${field.key}" ${val ? 'checked' : ''}> ${field.placeholder || '启用'}</label>`;
+    } else if (field.type === 'number') {
+      html += `<input type="number" name="param_${field.key}" value="${val}" placeholder="${field.placeholder || ''}">`;
+    } else {
+      html += `<input type="${field.type}" name="param_${field.key}" value="${val}" placeholder="${field.placeholder || ''}">`;
+    }
+
+    html += help + '</div>';
+  });
+
+  if (hasFields) {
+    html = '<div class="section-title">插件专属参数</div>' + html;
+  }
+
+  container.innerHTML = html;
+
+  container.querySelectorAll('[data-sensitive="true"]').forEach(el => {
+    if (el.tagName === 'TEXTAREA') {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'password-wrapper';
+      el.parentNode.insertBefore(wrapper, el);
+      wrapper.appendChild(el);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'password-toggle';
+      btn.title = '显示';
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+      btn.onclick = () => togglePasswordBtn(btn);
+      wrapper.appendChild(btn);
+    }
+  });
+}
+
+document.getElementById('taskForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const form = this;
+  const pluginId = document.getElementById('pluginSelect').value;
+  if (!pluginId) { showToast('error', '请选择插件'); return; }
+
+  const params = {};
+  document.querySelectorAll('[name^="param_"]').forEach(el => {
+    const key = el.name.replace('param_', '');
+    if (el.type === 'checkbox') params[key] = el.checked;
+    else params[key] = el.value;
+  });
+
+  // 通用字段同步到 params，确保插件代码能读取
+  const commonCookie = document.getElementById('cookie').value;
+  if (commonCookie) params['cookie'] = commonCookie;
+
+  const body = {
+    plugin_id: parseInt(pluginId),
+    name: document.getElementById('taskName').value,
+    site_url: document.getElementById('siteUrl').value,
+    username: document.getElementById('username').value,
+    password: document.getElementById('password').value,
+    cookie: document.getElementById('cookie').value,
+    cron_expr: document.getElementById('cronExpr').value,
+    enabled: document.getElementById('enabled').checked ? 1 : 0,
+    params: params,
+  };
+
+  try {
+    const url = isEdit ? `/api/tasks/${taskData.id}` : '/api/tasks';
+    const method = isEdit ? 'PUT' : 'POST';
+    const resp = await fetch(url, {
+      method: method,
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+
+    if (resp.ok) {
+      showToast('success', isEdit ? '任务已更新' : '任务创建成功');
+      setTimeout(() => location.href = '/', 800);
+    } else {
+      const err = await resp.json();
+      showToast('error', err.error || '操作失败');
+    }
+  } catch(e) {
+    showToast('error', '网络错误');
+  }
+});
+</script>
+{% endblock %}

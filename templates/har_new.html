@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}导入 HAR 模板 - 签到管理系统{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 860px; margin: 0 auto;">
+  <div class="card-header">
+    <h2>导入抓包</h2>
+  </div>
+
+  <div style="padding: 14px; background: var(--primary-light); border-radius: var(--radius);
+              font-size: 13px; color: var(--primary); line-height: 1.7; margin-bottom: 20px;">
+    <strong>怎么抓包（Chrome / Edge）：</strong><br>
+    1. 打开目标站点并登录 → 按 <code>F12</code> → 切到 <code>Network</code> 面板<br>
+    2. 勾上 <strong>「保留日志 / Preserve log」</strong>（很重要，否则跳转后记录会清空）<br>
+    3. 点一下「清空」→ 手动完成一次签到操作<br>
+    4. 在网络请求列表里右键 → <strong>「另存为带内容的 HAR」</strong> → 保存文件<br>
+    5. 回到这里上传该文件
+  </div>
+
+  <div class="form-group">
+    <label>步骤 1：选择导入方式</label>
+    <div style="display: flex; gap: 16px; margin-top: 6px;">
+      <label style="font-weight: 400;">
+        <input type="radio" name="srcMode" value="har" checked onchange="switchMode()"> 上传 HAR 文件
+      </label>
+      <label style="font-weight: 400;">
+        <input type="radio" name="srcMode" value="curl" onchange="switchMode()"> 粘贴 cURL 命令
+      </label>
+    </div>
+  </div>
+
+  <div id="harBox">
+    <div class="form-group">
+      <label>上传 .har 文件</label>
+      <input type="file" id="harFile" accept=".har,.json" onchange="handleHarFile(this)">
+      <div class="help-text">文件只在浏览器里读成文本，之后随表单一起提交，不会上传到别处</div>
+    </div>
+    <div class="form-group">
+      <label>或者直接粘贴 HAR 内容</label>
+      <textarea id="harText" rows="8" style="font-family: var(--mono); font-size: 12px;"
+        placeholder='{"log":{"version":"1.2","entries":[...]}}'></textarea>
+    </div>
+  </div>
+
+  <div id="curlBox" style="display: none;">
+    <div class="form-group">
+      <label>cURL 命令</label>
+      <textarea id="curlText" rows="8" style="font-family: var(--mono); font-size: 12px;"
+        placeholder="curl 'https://example.com/api/sign' -X POST -H 'Cookie: sid=xxx' --data 'a=1'"></textarea>
+      <div class="help-text">Chrome 里：右键请求 → Copy → Copy as cURL (bash)，然后粘到这里</div>
+    </div>
+  </div>
+
+  <div class="modal-actions">
+    <a href="/har" class="btn">取消</a>
+    <button class="btn btn-primary" id="parseBtn" onclick="parseContent()">解析并预览请求</button>
+  </div>
+</div>
+
+<!-- 解析结果预览 -->
+<div class="card" id="previewCard" style="max-width: 1000px; margin: 20px auto 0; display: none;">
+  <div class="card-header">
+    <h2>步骤 2：确认要执行的请求</h2>
+    <div style="font-size: 12px; color: var(--text-muted);" id="previewHint"></div>
+  </div>
+
+  <div class="form-group">
+    <label>模板名称 <span class="required">*</span></label>
+    <input type="text" id="tplName" placeholder="例如：某某论坛每日签到">
+  </div>
+  <div class="form-group">
+    <label>备注</label>
+    <input type="text" id="tplNote" placeholder="选填，例如：签到入口在 /plugin.php">
+  </div>
+
+  <div style="overflow-x: auto; max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius);">
+    <table style="min-width: 780px;">
+      <thead>
+        <tr>
+          <th style="width: 50px;">启用</th>
+          <th style="width: 70px;">方法</th>
+          <th>URL</th>
+          <th style="width: 80px;">状态</th>
+        </tr>
+      </thead>
+      <tbody id="previewBody"></tbody>
+    </table>
+  </div>
+
+  <div class="help-text" style="margin-top: 10px;">
+    静态资源（.js/.css/图片等）已默认取消勾选。只勾选「签到真正需要的那几个请求」，
+    通常就是 1~3 个。
+  </div>
+
+  <div class="modal-actions">
+    <a href="/har" class="btn">取消</a>
+    <button class="btn btn-primary" onclick="saveTemplate()">创建模板并去编辑</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let parsedEntries = [];
+let parsedHost = '';
+
+function switchMode() {
+  const mode = document.querySelector('input[name="srcMode"]:checked').value;
+  document.getElementById('harBox').style.display = mode === 'har' ? '' : 'none';
+  document.getElementById('curlBox').style.display = mode === 'curl' ? '' : 'none';
+}
+
+function handleHarFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => { document.getElementById('harText').value = e.target.result; };
+  reader.readAsText(file);
+}
+
+async function parseContent() {
+  const mode = document.querySelector('input[name="srcMode"]:checked').value;
+  const content = mode === 'curl'
+    ? document.getElementById('curlText').value.trim()
+    : document.getElementById('harText').value.trim();
+
+  if (!content) { showToast('error', '请先提供抓包内容'); return; }
+
+  const btn = document.getElementById('parseBtn');
+  btn.disabled = true;
+  btn.textContent = '解析中…';
+
+  try {
+    const resp = await fetch('/api/har/upload', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ content, source: mode }),
+    });
+    const data = await resp.json();
+    if (!data.success) { showToast('error', data.message); return; }
+
+    parsedEntries = data.entries;
+    parsedHost = data.host || '';
+    document.getElementById('tplName').value = data.suggest_name;
+    document.getElementById('previewHint').textContent =
+      `共解析出 ${data.total} 个请求，默认勾选 ${data.checked} 个`;
+    renderPreview();
+    document.getElementById('previewCard').style.display = '';
+    document.getElementById('previewCard').scrollIntoView({behavior: 'smooth'});
+  } catch(e) {
+    showToast('error', '解析失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '解析并预览请求';
+  }
+}
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function renderPreview() {
+  const body = document.getElementById('previewBody');
+  body.innerHTML = parsedEntries.map((en, i) => {
+    const req = en.request || {};
+    const st = (en.response || {}).status;
+    // URL 太长时截断显示，但 title 里给全量
+    const url = req.url || '';
+    const shown = url.length > 110 ? url.slice(0, 110) + '…' : url;
+    const post = req.data ? ' <span class="badge badge-neutral" style="font-size:10px;">body</span>' : '';
+    return `<tr>
+      <td style="text-align:center;">
+        <input type="checkbox" ${en.checked ? 'checked' : ''}
+          onchange="parsedEntries[${i}].checked = this.checked">
+      </td>
+      <td><span class="badge ${req.method === 'GET' ? 'badge-neutral' : 'badge-warning'}"
+        style="font-family:var(--mono);font-size:11px;">${esc(req.method)}</span></td>
+      <td style="font-family: var(--mono); font-size: 11px; word-break: break-all;" title="${esc(url)}">
+        ${esc(shown)}${post}
+      </td>
+      <td style="font-size: 12px; color: var(--text-muted);">${st || '-'}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function saveTemplate() {
+  const name = document.getElementById('tplName').value.trim();
+  if (!name) { showToast('error', '请填写模板名称'); return; }
+
+  const selected = parsedEntries.filter(e => e.checked);
+  if (!selected.length) { showToast('error', '至少勾选 1 个请求'); return; }
+
+  try {
+    const resp = await fetch('/api/har', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name,
+        host: parsedHost,
+        note: document.getElementById('tplNote').value.trim(),
+        entries: parsedEntries,
+      }),
+    });
+    const data = await resp.json();
+    if (data.success) {
+      showToast('success', '模板已创建，正在打开编辑器');
+      setTimeout(() => location.href = '/har/' + data.id + '/edit', 700);
+    } else {
+      showToast('error', data.message || '创建失败');
+    }
+  } catch(e) {
+    showToast('error', '创建失败：' + e.message);
+  }
+}
+</script>
+{% endblock %}

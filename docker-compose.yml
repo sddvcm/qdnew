@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  checkin:
+    build: .
+    container_name: checkin-system
+    restart: unless-stopped
+    ports:
+      - "5800:5800"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./user_plugins:/app/user_plugins
+      # ⚠️ 代码目录挂载 —— 这是「程序内更新后不用重新部署」的**前提**。
+      # 不挂载的话，容器里的 /app 是镜像副本，更新写进去的文件在容器重建后
+      # 就丢了。挂载宿主机目录后，更新才真正落盘，重启容器依然生效。
+      #
+      # 安全性：依赖装在 site-packages（/usr/local/lib），不在 /app，
+      # 所以挂载不会覆盖已安装的依赖。但若更新改了 requirements.txt，
+      # 仍需重建镜像来安装新依赖（页面会提示）。
+      - ./:/app
+    environment:
+      - CHECKIN_SECRET_KEY=${CHECKIN_SECRET_KEY:-change-me-to-a-random-string}
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5800/')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3

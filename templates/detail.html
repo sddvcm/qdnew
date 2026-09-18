@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}{{ task.name }} - 签到详情{% endblock %}
+
+{% block content %}
+<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+  <a href="/" class="btn btn-sm">返回列表</a>
+  <h2 style="font-size: 16px; font-weight: 600;">{{ task.name }}</h2>
+  {% if task.status == 'normal' %}
+  <span class="badge badge-success"><span class="status-dot success"></span> 正常</span>
+  {% elif task.status == 'error' %}
+  <span class="badge badge-danger"><span class="status-dot danger"></span> 异常</span>
+  {% endif %}
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card"><div class="stat-label">站点地址</div><div class="stat-value" style="font-size:14px;">{{ task.site_url or '-' }}</div></div>
+  <div class="stat-card"><div class="stat-label">用户名</div><div class="stat-value" style="font-size:14px;">{{ task.username or '-' }}</div></div>
+  <div class="stat-card"><div class="stat-label">定时规则</div><div class="stat-value" style="font-size:14px;">{{ task.cron_expr }}</div></div>
+  <div class="stat-card"><div class="stat-label">下次运行</div><div class="stat-value" style="font-size:14px;">{{ task.next_run_str or '待计算' }}</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>签到日历</h2>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <button class="btn btn-sm" onclick="changeMonth(-1)">上一月</button>
+      <span id="calendarTitle" style="font-size:14px; font-weight:500;"></span>
+      <button class="btn btn-sm" onclick="changeMonth(1)">下一月</button>
+    </div>
+  </div>
+  <div class="calendar-stats" id="calendarStats"></div>
+  <div class="calendar-grid" id="calendarGrid"></div>
+  <div class="calendar-legend">
+    <span><span class="legend-dot success"></span> 已签到</span>
+    <span><span class="legend-dot failed"></span> 失败</span>
+    <span><span class="legend-dot missed"></span> 未签到</span>
+    <span><span class="legend-dot future"></span> 未来</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h2>签到记录</h2></div>
+  <div class="log-list">
+    {% if logs %}
+    {% for log in logs %}
+    <div class="log-item">
+      <div class="log-date">{{ log.checkin_date }} {{ log.checkin_time }}</div>
+      <div class="log-msg">
+        <span class="badge {{ 'badge-success' if log.result == 'success' else 'badge-danger' }}">
+          {{ '成功' if log.result == 'success' else '失败' }}
+        </span>
+        {{ log.message[:100] }}
+      </div>
+      {% if log.extra_info and log.extra_info != '{}' %}
+      <div class="log-extra">
+        {% set extra = log.extra_info | tojson | default('{}') %}
+        耗时: {{ log.duration_ms }}ms
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state"><p>暂无签到记录</p></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentYear = new Date().getFullYear();
+let currentMonth = new Date().getMonth() + 1;
+const taskId = {{ task.id }};
+
+async function loadCalendar() {
+  document.getElementById('calendarTitle').textContent = `${currentYear}年 ${currentMonth}月`;
+  try {
+    const resp = await fetch(`/api/tasks/${taskId}/calendar?year=${currentYear}&month=${currentMonth}`);
+    const data = await resp.json();
+    renderCalendar(data);
+  } catch(e) {}
+}
+
+function renderCalendar(data) {
+  const grid = document.getElementById('calendarGrid');
+  const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
+  let html = weekDays.map(d => `<div class="calendar-header">${d}</div>`).join('');
+
+  const firstDay = new Date(currentYear, currentMonth - 1, 1).getDay();
+  const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+  const today = new Date().toISOString().split('T')[0];
+  let successCount = 0, failedCount = 0, missedCount = 0;
+
+  for (let i = 0; i < firstDay; i++) {
+    html += '<div class="calendar-day empty"></div>';
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const result = data[dateStr];
+    let cls = 'calendar-day';
+    if (result === 'success') { cls += ' success'; successCount++; }
+    else if (result === 'failed') { cls += ' failed'; failedCount++; }
+    else if (dateStr < today) { cls += ' missed'; missedCount++; }
+    else { cls += ' future'; }
+
+    html += `<div class="${cls}" title="${dateStr}${result ? ': ' + result : ''}">${d}</div>`;
+  }
+
+  grid.innerHTML = html;
+
+  document.getElementById('calendarStats').innerHTML = `
+    <span class="stat-item"><strong>${successCount}</strong> 次成功</span>
+    <span class="stat-item"><strong>${failedCount}</strong> 次失败</span>
+    <span class="stat-item"><strong>${missedCount}</strong> 次漏签</span>
+  `;
+}
+
+function changeMonth(delta) {
+  currentMonth += delta;
+  if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+  if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+  loadCalendar();
+}
+
+loadCalendar();
+</script>
+{% endblock %}

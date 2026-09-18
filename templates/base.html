@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}签到管理系统{% endblock %}</title>
+<link rel="stylesheet" href="/static/css/app.css">
+{% block head %}{% endblock %}
+</head>
+<body>
+<header class="header">
+  <h1>签到管理系统</h1>
+  <nav class="header-nav">
+    <a href="/" class="{% if request.path == '/' %}active{% endif %}">任务列表</a>
+    <a href="/task/add" class="{% if request.path == '/task/add' %}active{% endif %}">添加任务</a>
+    <a href="/har" class="{% if request.path.startswith('/har') %}active{% endif %}">HAR 模板</a>
+    <a href="/plugin/import" class="{% if request.path == '/plugin/import' %}active{% endif %}">导入插件</a>
+    <a href="/settings" class="{% if request.path == '/settings' %}active{% endif %}">系统设置</a>
+  </nav>
+</header>
+<div class="container">
+{% block content %}{% endblock %}
+</div>
+<div id="toast" class="toast"></div>
+<script src="/static/js/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
