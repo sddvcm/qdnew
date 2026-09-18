@@ -1,0 +1,33 @@
+#!/bin/bash
+# 安装后执行：解压运行时 → 初始化数据目录 → 生成密钥 → 修正归属
+# 必须幂等（官方要求：安装流程可能被重新执行）。
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=common.sh
+source "$SCRIPT_DIR/common.sh"
+
+log_msg "install_callback: 开始 (APP_DIR=$APP_DIR)"
+
+# 1. 数据目录（全部落在 var=@appdata，升级/重装不丢）
+ensure_dirs
+
+# 2. 解压内置运行时（tar 还原软链与执行位；失败则让安装报错退出）
+if ! extract_runtime; then
+    exit 1
+fi
+
+# 3. 生成 etc/app.env（含随机密钥；已存在则保留 —— 密钥不能变）
+init_env_file
+
+# 4. 若本机此前以其他方式（Docker/裸跑）装过，同盘存在旧 data/，尝试迁移数据库
+OLD_DATA="$APP_DIR/data"
+if [ -f "$OLD_DATA/checkin.db" ] && [ ! -f "$DATA_DIR/checkin.db" ]; then
+    cp -p "$OLD_DATA"/checkin.db* "$DATA_DIR"/ 2>/dev/null
+    log_msg "install_callback: 已迁移旧数据库到 $DATA_DIR"
+fi
+
+# 5. 修正归属（root 执行时交给包用户，保证「程序内更新」可写）
+fix_ownership
+
+log_msg "install_callback: 完成"
+exit 0

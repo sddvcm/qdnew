@@ -1,0 +1,13 @@
+{
+  ".url": {
+    "checkin-system.main": {
+      "title": "签到管理系统",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "http",
+      "port": "5800",
+      "url": "/",
+      "allUsers": true
+    }
+  }
+}

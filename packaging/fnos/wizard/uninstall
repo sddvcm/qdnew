@@ -1,0 +1,21 @@
+[
+  {
+    "stepTitle": "卸载签到管理系统",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "卸载默认保留你的数据（任务配置、账号、签到记录、备份），重装后自动恢复。"
+      },
+      {
+        "type": "switch",
+        "field": "purge_data",
+        "label": "同时删除全部数据",
+        "initValue": false
+      },
+      {
+        "type": "tips",
+        "helpText": "⚠️ 打开上方开关将删除数据库与全部签到记录，且不可恢复。"
+      }
+    ]
+  }
+]

@@ -63,7 +63,9 @@ import requests
 # 不是它的父目录（早期写成 dirname(dirname(__file__)) 会指到项目外一层，
 # 后果是 build_manifest 遍历不到任何文件、run_update 把文件写到错误位置）。
 ROOT = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(ROOT, "data")
+# 备份目录跟随数据目录（fpk 模式下 CHECKIN_DATA_DIR 指向 fnOS 持久化目录，
+# 这样升级应用 / 重建容器后备份仍在）。
+DATA_DIR = os.environ.get("CHECKIN_DATA_DIR") or os.path.join(ROOT, "data")
 BACKUP_DIR = os.path.join(DATA_DIR, "backups")
 VERSION_FILE = os.path.join(ROOT, "version.json")
 MANIFEST_NAME = "update_manifest.json"

@@ -1,0 +1,28 @@
+#!/bin/bash
+# 升级后执行：新包的 target 已就位 —— 重解压运行时（版本可能更新）、补齐数据目录、修正归属。
+# 密钥与数据在 etc / var 中，不受升级影响。fnOS 会在升级后重新启动应用。
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+log_msg "upgrade_callback: 开始 (OLD=$TRIM_OLD_APPVER NEW=$TRIM_APPVER)"
+
+ensure_dirs
+
+# 强制重新解压运行时（新包可能带了新版 Python / 依赖）
+rm -rf "$RUNTIME_DIR" 2>/dev/null
+if [ -f "$RUNTIME_TAR" ]; then
+    if ! extract_runtime; then
+        exit 1
+    fi
+    rm -f "$RUNTIME_TAR"
+fi
+
+# 旧包遗留的 runtime.tgz（历史命名）也清理掉
+rm -f "$APP_DIR/runtime.tgz" 2>/dev/null
+
+init_env_file
+fix_ownership
+
+log_msg "upgrade_callback: 完成"
+exit 0

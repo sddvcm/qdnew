@@ -1,0 +1,105 @@
+#!/bin/bash
+# 签到管理系统 — 启动 / 停止 / 状态
+# 由飞牛 fnOS 调用：cmd/main start|stop|status
+# 退出码：start/stop 0=成功 1=失败；status 0=运行中 3=未运行
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=common.sh
+source "$SCRIPT_DIR/common.sh"
+
+start_app() {
+    ensure_dirs
+    if is_running; then
+        log_msg "start: 已在运行"
+        return 0
+    fi
+
+    # 运行时缺失时尝试自愈（升级脚本漏了/手动覆盖过目录）
+    if [ ! -x "$PY_BIN" ]; then
+        extract_runtime || return 1
+    fi
+
+    load_env_file
+
+    log_msg "start: 启动 (port=${APP_PORT:-$DEFAULT_PORT})"
+    cd "$APP_DIR" || return 1
+    PORT="${APP_PORT:-$DEFAULT_PORT}" \
+    CHECKIN_SECRET_KEY="${CHECKIN_SECRET_KEY:-}" \
+    CHECKIN_DATA_DIR="$DATA_DIR" \
+    CHECKIN_USER_PLUGINS_DIR="$USER_PLUGINS_DIR" \
+    nohup "$PY_BIN" -m app.main >> "$LOG_FILE" 2>&1 &
+    local pid=$!
+    echo "$pid" > "$PID_FILE"
+
+    # 等待进程稳定（Flask 启动 + APScheduler 初始化）
+    local i=0
+    while [ $i -lt 10 ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            log_msg "start: 进程启动即退出，查看 $LOG_FILE"
+            echo "应用启动失败，请到 $LOG_DIR 查看日志。" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+            rm -f "$PID_FILE"
+            return 1
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    log_msg "start: 已启动 (PID=$pid)"
+    return 0
+}
+
+stop_app() {
+    local pid=""
+    if [ -f "$PID_FILE" ]; then
+        pid=$(head -n 1 "$PID_FILE" 2>/dev/null | tr -d '[:space:]')
+        if ! kill -0 "$pid" 2>/dev/null; then
+            pid=""
+        fi
+    fi
+    if [ -z "$pid" ]; then
+        pid=$(find_running_pid)
+    fi
+    if [ -z "$pid" ]; then
+        rm -f "$PID_FILE"
+        return 0
+    fi
+
+    log_msg "stop: SIGTERM -> $pid"
+    kill -TERM "$pid" 2>/dev/null
+    local i=0
+    while kill -0 "$pid" 2>/dev/null && [ $i -lt 10 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        log_msg "stop: SIGKILL -> $pid"
+        kill -KILL "$pid" 2>/dev/null
+        sleep 1
+    fi
+    rm -f "$PID_FILE"
+    return 0
+}
+
+case "$1" in
+    start)
+        start_app
+        ;;
+    stop)
+        stop_app
+        ;;
+    status)
+        if is_running; then
+            exit 0
+        fi
+        # 自愈：PID 文件丢失但进程实际还在（如 var 目录被清过）
+        pid=$(find_running_pid)
+        if [ -n "$pid" ]; then
+            echo "$pid" > "$PID_FILE"
+            exit 0
+        fi
+        exit 3
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status}" >&2
+        exit 1
+        ;;
+esac

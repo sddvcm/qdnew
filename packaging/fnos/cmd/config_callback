@@ -1,0 +1,10 @@
+#!/bin/bash
+# 配置变更后（占位）：当前无可配置项。若应用在运行，发送 HUP 无效果（Flask 不处理），
+# 提示用户手动重启即可 —— 保留脚本以满足 fpk 结构完整性。
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/common.sh" 2>/dev/null
+
+if is_running; then
+    log_msg "config_callback: 配置已更新，如需生效请在应用中心重启应用"
+fi
+exit 0

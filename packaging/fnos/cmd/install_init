@@ -1,0 +1,25 @@
+#!/bin/bash
+# 安装前执行：环境预检（架构 / 磁盘空间）
+# 任何检查失败都要把**用户能看懂的原因**写进 $TRIM_TEMP_LOGFILE 再退出非零。
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=common.sh
+source "$SCRIPT_DIR/common.sh" 2>/dev/null
+
+# 1) 架构检查：本包内置的是 x86_64 运行时
+ARCH=$(uname -m)
+if [ "$ARCH" != "x86_64" ]; then
+    echo "此应用仅支持 x86_64 架构，当前设备为 ${ARCH}，无法安装。" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+    exit 1
+fi
+
+# 2) 磁盘空间检查：内置运行时解压后约 1GB，预留 1.5GB
+if [ -n "$TRIM_APPDEST_VOL" ]; then
+    AVAIL_KB=$(df -Pk "$TRIM_APPDEST_VOL" 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -n "$AVAIL_KB" ] && [ "$AVAIL_KB" -lt 1572864 ]; then
+        echo "磁盘空间不足：需要约 1.5GB 可用空间，当前仅 $((AVAIL_KB / 1024))MB。" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+        exit 1
+    fi
+fi
+
+exit 0

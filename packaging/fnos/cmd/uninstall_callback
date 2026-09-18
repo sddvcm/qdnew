@@ -1,0 +1,14 @@
+#!/bin/bash
+# 卸载后执行：根据卸载向导的选择决定是否删除用户数据。
+# 默认保留（var=@appdata 与 etc=@appconf 在 fnOS 卸载时不被自动清除），
+# 用户在卸载向导打开「同时删除全部数据」时才清理。
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/common.sh" 2>/dev/null
+
+if [ "${purge_data:-false}" = "true" ] || [ "${purge_data}" = "True" ]; then
+    rm -rf "$VAR_DIR" "$ETC_DIR" 2>/dev/null
+    log_msg "uninstall_callback: 用户选择删除数据，已清理 var/etc"
+fi
+
+exit 0

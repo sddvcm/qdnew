@@ -9,7 +9,12 @@ from .database import get_db
 from plugins.base import BasePlugin
 
 BUILTIN_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "plugins")
-USER_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "user_plugins")
+# ⚠️ 用户插件目录可通过环境变量重定向。
+# 默认 <项目根>/user_plugins（Docker / 本地开发行为不变）；
+# 飞牛 fpk 模式下注入 CHECKIN_USER_PLUGINS_DIR=$TRIM_PKGVAR/user_plugins，
+# 用户上传的插件落在 fnOS 持久化目录，应用升级不会被冲掉。
+USER_DIR = os.environ.get("CHECKIN_USER_PLUGINS_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "user_plugins")
 
 _loaded_plugins: dict = {}
 

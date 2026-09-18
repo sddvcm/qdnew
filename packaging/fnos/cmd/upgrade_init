@@ -1,0 +1,15 @@
+#!/bin/bash
+# 升级前执行：确保数据落点正确（target 目录会被新包覆盖，数据在 var 不受影响）
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/common.sh" 2>/dev/null
+
+ensure_dirs
+
+# 若旧版本曾把数据库放在 target/data（v1.0 fpk 之前的手工安装），迁移到 var
+OLD_DATA="$APP_DIR/data"
+if [ -f "$OLD_DATA/checkin.db" ] && [ ! -f "$DATA_DIR/checkin.db" ]; then
+    cp -p "$OLD_DATA"/checkin.db* "$DATA_DIR"/ 2>/dev/null
+    log_msg "upgrade_init: 迁移旧数据库 $OLD_DATA -> $DATA_DIR"
+fi
+
+exit 0

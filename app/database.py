@@ -2,7 +2,12 @@
 import sqlite3
 import os
 
-DB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+# ⚠️ 数据目录可通过环境变量重定向。
+# 默认 <项目根>/data（Docker / 本地开发行为不变）；
+# 飞牛 fpk 模式下由 cmd/main 注入 CHECKIN_DATA_DIR=$TRIM_PKGVAR/data，
+# 让数据库落在 fnOS 的持久化数据目录（@appdata），升级/重装应用不丢数据。
+DB_DIR = os.environ.get("CHECKIN_DATA_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data")
 DB_PATH = os.path.join(DB_DIR, "checkin.db")
 
 
