@@ -1,0 +1,54 @@
+# 构建镜像时排除的文件 —— ⚠️ 这个文件很重要
+#
+# 没有它的话 Dockerfile 的 `COPY . .` 会把下面这些东西一起烤进镜像：
+#   - .env            你的加密密钥（镜像里任何人可读，等于泄密）
+#   - data/           含任务配置、加密后的账号密码、签到记录的 SQLite 数据库
+#   - logs/           运行日志
+#   - .git/           版本历史（体积大且无意义）
+#   - __pycache__/    Windows 下生成的缓存，带进 Linux 容器可能引发怪异问题
+#
+# 镜像里只需要"代码 + 默认配置"，用户数据一律靠 volume 挂载。
+
+# ---- 敏感数据（绝对不能进镜像）----
+.env
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+
+# ---- 用户自己的东西 ----
+user_plugins/*.py
+!user_plugins/__init__.py
+
+# ---- 版本控制与缓存 ----
+.git/
+.gitignore
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ---- 开发/测试产物（镜像里不需要）----
+__har_test/
+__ref_*/
+__verify_*/
+docs/
+DEVELOPMENT.md
+update_manifest.json
+
+# ---- 本地环境 ----
+venv/
+.venv/
+env/
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+
+# ---- 部署辅助 ----
+README.md
+docker-compose.yml
+Dockerfile
+.dockerignore

@@ -312,6 +312,19 @@ for path, why in FORBIDDEN_CASES:
     except updater.UpdateError:
         check(f"3.6 拒绝更新 {path}（{why}）", True)
 
+# 3.6b .env.example 允许下发，但真正的 .env 必须被拒（安全边界）
+try:
+    updater.validate_path(".env.example")
+    check("3.6b 允许更新 .env.example（部署模板）", True)
+except updater.UpdateError as e:
+    check("3.6b 允许更新 .env.example（部署模板）", False, str(e))
+
+try:
+    updater.validate_path(".env")
+    check("3.6c 仍然拒绝 .env（密钥绝不能覆盖）", False, "竟然通过了")
+except updater.UpdateError:
+    check("3.6c 仍然拒绝 .env（密钥绝不能覆盖）", True)
+
 # 3.7 update_manifest.json 自身不能被覆盖（防自指篡改）
 try:
     updater.validate_path("update_manifest.json")
@@ -371,8 +384,10 @@ manifest = updater.build_manifest("9.9.9", "测试")
 bad_keys = [k for k in manifest["files"]
             if k.startswith("data/") or k == ".env" or "user_plugins" in k]
 check("3.12 生成的清单不含敏感文件", not bad_keys, bad_keys)
+check("3.12b 清单不含 .env 本身", ".env" not in manifest["files"])
 check("3.13 清单含核心文件", "app/main.py" in manifest["files"]
       and "har/render.py" in manifest["files"], list(manifest["files"])[:6])
+check("3.13b 清单含部署模板 .env.example", ".env.example" in manifest["files"])
 check("3.14 清单每个值都是 sha256", all(
     len(v) == 64 and all(c in "0123456789abcdef" for c in v)
     for v in manifest["files"].values()))

@@ -1,8 +1,8 @@
 {
   "name": "checkin-system",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "released_at": "2026-09-18",
-  "notes": "HAR通用签到引擎；PushPlus推送检测；云码验证码；程序内自动更新",
+  "notes": "修正 Docker 部署配置：新增 .dockerignore（防止 .env/data 烤进镜像）、改单卷挂载、加 .env.example 模板与飞牛 NAS 部署文档",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "9f09d1fd1aeea6e5817105a86be3ad19694cf33067c4fbd1613be78164969daa",
@@ -22,8 +22,10 @@
     "app/routes/__init__.py": "2231d15749360cdc2f16b10779b9ac5e206f9884c4f274149ec474ee1f6d5645",
     "app/static/css/app.css": "fd5386086a88d4eef9b80d5f317878927d0a34f2d7f31a82974828f42694459f",
     "app/static/js/app.js": "f24035819e06961c487a1df0bc2712f5fe02d4aeab1f04008557d1a65478c439",
+    "docs/DEPLOY-FNOS.md": "088cfee0b6bcfbadef88758557c005695bfd0f96cf926ed68744ac87b2c08be3",
     "docs/hyperdown-handoff.md": "d9e983d0a2eed7e147c72d0f4225f31f41c9c1043b48d4c067a72cfcfd95af02",
     "docs/README.md": "552fa52a0e450fd1339e8e69ea7442bbe1d548e92c854ced98260d518a3ae34f",
+    "docs/USAGE.md": "12021bbbd2fb8cbc6cfb73e62a1291f3dd4331f67cf990ceefa7a1c2fe63b6e7",
     "har/engine.py": "25bb4de5d26f9474f74ed5738acd695298d755f0977d9c16b3672f2b49d009a4",
     "har/parser.py": "02f922d71a620fbe771e84b5141393e57b5dbc5d5b4b2bc6ee76efe82f8b8f60",
     "har/render.py": "43959675b5c9279556a01934dd83e504f93662dc25459b9b61da72a35d5b7052",
@@ -43,11 +45,12 @@
     "templates/plugin_import.html": "6ff9455f5bd2cb6963fade2537a90d2db5bec9dec8613c0d2d954d755413a9ec",
     "templates/settings.html": "3630a5629cc23854fd090ca4ce020c0f28d7403c79585645ab318a17bba4a9a9",
     "templates/task_form.html": "e5884b47144a58f3d0ee439bf77e043d2aba08213982be05ad776c548ccfdc2a",
+    ".env.example": "dd2d7cd04bf50554183da61460b66b4cb4811776f312af2a46739fbb3d1ec338",
     "DEVELOPMENT.md": "7ef37653b649883881fed46b64edbadb2dfa5883920647bf3d9c897fb4cae843",
-    "README.md": "12021bbbd2fb8cbc6cfb73e62a1291f3dd4331f67cf990ceefa7a1c2fe63b6e7",
+    "README.md": "475b7cbe313357adde8275a319552469b223cb326a5bed1a1641b8c350b626ec",
     "captcha.py": "763f269ca7278a05b0b481a5fe8e0356be65e5c92a6b90c34e4bc5cf30b1d076",
     "requirements.txt": "0427e7da8fe18d452117ea2b80dcc6510809beb4b2b4dac9eaf29c91d2c63e55",
-    "updater.py": "8fe57e6d24ffb31cfb579e27136743e35f59d9b1d260d0cee30132643afcc9fe",
-    "version.json": "e52682d0f7c6cda5aa854dd89b6b5c1206f74ae0ffddbdd1332299a08fa77852"
+    "updater.py": "ae2fb36b11cc4662d7727c92e6eb9e89504092c6949008a12b012554d7690aba",
+    "version.json": "8efbc1e375ba77bdc4c5db6f36e3135f30c8f43058f1be43da0221f81377c2dd"
   }
 }

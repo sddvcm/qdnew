@@ -83,13 +83,16 @@ FORBIDDEN_SEGMENTS = {
     ".env", "node_modules", ".workbuddy",
 }
 # 只允许这些扩展名被覆盖
-ALLOWED_EXT = {".py", ".html", ".css", ".js", ".json", ".md", ".txt"}
+ALLOWED_EXT = {".py", ".html", ".css", ".js", ".json", ".md", ".txt", ".example"}
 # 只允许这些顶层目录下的文件（根目录下的散文件由 ALLOWED_ROOT_FILES 单独控制）
 ALLOWED_DIRS = {"app", "har", "plugins", "templates", "docs"}
 ALLOWED_ROOT_FILES = {
     "version.json", "requirements.txt", "Dockerfile",
     "docker-compose.yml", "README.md", "DEVELOPMENT.md",
     "captcha.py", "updater.py", "app.py", "run.py",
+    # 部署模板：新装用户需要它来生成 .env。注意真正的 .env 仍在
+    # NEVER_OVERWRITE 里，绝不允许被更新覆盖。
+    ".env.example",
 }
 # 永不覆盖的文件（含敏感配置）
 NEVER_OVERWRITE = {".env", "update_manifest.json"}
