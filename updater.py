@@ -317,6 +317,22 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _hash_content(data: bytes) -> str:
+    """对"文本内容"算哈希 —— **统一按 LF 归一化后再算**。
+
+    ⚠️ 为什么必须归一化（踩过的大坑）：
+    打包机是 Windows，工作区文件是 **CRLF**；而 git 提交到 GitHub 后，
+    raw 下载回来的内容是 **LF**（git 的 autocrlf 或仓库存储本身）。
+    如果清单按本地 CRLF 算哈希，线上按 LF 校验 —— 12 个文件全部不匹配，
+    自动更新直接报"文件校验失败"整批拒绝。
+
+    所以清单与校验两侧都走这个函数：二进制按原样，文本先把 CRLF 折成 LF。
+    """
+    if b"\r\n" in data:
+        data = data.replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
+
+
 # ============================ 执行更新 ============================
 
 def run_update(source: str, allow_downgrade: bool = False,
@@ -361,8 +377,11 @@ def run_update(source: str, allow_downgrade: bool = False,
                 raise UpdateError(f"远端缺少清单里声明的文件：{safe}")
 
             if expect_hash:
-                actual = _sha256(data)
-                if actual.lower() != str(expect_hash).lower():
+                # 兼容两种清单：按 LF 归一化算的（本程序新版本）与按原始字节算的（旧版）。
+                # 只要任一匹配就放行 —— 避免因换行符差异整批拒绝。
+                exp = str(expect_hash).lower()
+                if _hash_content(data).lower() != exp and _sha256(data).lower() != exp:
+                    actual = _hash_content(data)
                     raise UpdateError(
                         f"文件校验失败：{safe}\n"
                         f"  期望 {str(expect_hash)[:16]}… 实际 {actual[:16]}…\n"
@@ -473,7 +492,9 @@ def build_manifest(version: str, notes: str = "", released_at: str = "") -> Dict
                 except UpdateError:
                     continue
                 with open(full, "rb") as f:
-                    files[rel] = _sha256(f.read())
+                    # ⚠️ 用 _hash_content（LF 归一化），别用 _sha256 ——
+                    # 本地 CRLF / GitHub LF 差异会让校验永远失败。
+                    files[rel] = _hash_content(f.read())
 
     for fn in sorted(ALLOWED_ROOT_FILES):
         full = os.path.join(ROOT, fn)
@@ -485,7 +506,7 @@ def build_manifest(version: str, notes: str = "", released_at: str = "") -> Dict
         except UpdateError:
             continue
         with open(full, "rb") as f:
-            files[rel] = _sha256(f.read())
+            files[rel] = _hash_content(f.read())
 
     return {
         "name": "checkin-system",
