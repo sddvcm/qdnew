@@ -314,6 +314,8 @@ check("9A.3 表单渠道容器用 notify-list",
       'id="notifyBinding" class="notify-list"' in _check_html)
 check("9A.4 旧的渠道 chip 内联样式已移除（padding:3px 0 那版）",
       'gap:6px; padding:3px 0;' not in _check_html)
+check("9A.5 CSS 预留滚动条槽位（分页切换时布局不左右晃）",
+      "scrollbar-gutter: stable" in _css)
 
 print()
 print("10. 空库导出 / 空包导入")

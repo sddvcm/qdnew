@@ -1,8 +1,8 @@
 {
   "name": "checkin-system",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "released_at": "2026-09-19",
-  "notes": "修复在线更新后重启启动失败（核心：旧字节码缓存未清理）；日志文件迁移到共享目录并接入完整日志体系（此前日志文件是空的，启动失败时没有任何线索）",
+  "notes": "修复设置页切换分页时整体左右晃动：长内容出现滚动条、短内容消失导致居中布局平移，现始终预留滚动条槽位，导航位置固定",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "3be5458f97c1874ce3c7a20330adb15d7660bf42d40fdc39460c55920492a10e",
@@ -26,7 +26,7 @@
     "app/routes/transfer_api.py": "6242bd446d99de85f0b38df728f57ed1e747794c7895d38ab50d2587a307fe5c",
     "app/routes/update_api.py": "c0525ea3c7991cec81d4b97f45e3ac34731d96007000183a9ff2c8a5279fc8b2",
     "app/routes/__init__.py": "2231d15749360cdc2f16b10779b9ac5e206f9884c4f274149ec474ee1f6d5645",
-    "app/static/css/app.css": "07e1814071e60141ef8c62514dbc981c2527c454dabe8b3fd439d7c4fa57d10a",
+    "app/static/css/app.css": "f2f55b14c055e227bb7634275ce7e2021bb6a33bb0b48b83d08d0b055eb5fdda",
     "app/static/js/app.js": "f24035819e06961c487a1df0bc2712f5fe02d4aeab1f04008557d1a65478c439",
     "docs/DEPLOY-FNOS.md": "5821bf5a21d62544caf8c4bfc10abbb2ecdb07050ed5660c5c75b95534cc8328",
     "docs/hyperdown-handoff.md": "d9e983d0a2eed7e147c72d0f4225f31f41c9c1043b48d4c067a72cfcfd95af02",
@@ -57,6 +57,6 @@
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
     "updater.py": "b89a8fa97fba4ae8f0ede81e5d6301d19817932ed2423d6d65b1d30d69bf613b",
-    "version.json": "159cfcb256d1dc716035eac47a64053ae06e310c52a3fdbaa4ed5bc5d032006d"
+    "version.json": "73e5cb723f79e6e10d46607c540d3fc40dbf9f1467dbfc922282d8225eb4144b"
   }
 }

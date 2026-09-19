@@ -11,6 +11,13 @@
   --mono: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
 }
 body { font-family: var(--font); font-size: 14px; color: var(--text); background: var(--bg); line-height: 1.6; }
+
+/* ⚠️ 预留纵向滚动条槽位（用户实测：设置页左侧导航切换分页时整卡左右平移）。
+   页面是居中布局（margin: 0 auto）：切到内容长的分页 → 纵向滚动条出现 →
+   视口变窄 ~17px → 容器整体左移；切回短分页 → 滚动条消失 → 又移回去。
+   scrollbar-gutter: stable 让滚动条槽位**始终保留**（没滚动条时也占位），
+   布局位置就固定了。不支持的旧浏览器会忽略此条，仅退回旧行为。 */
+html { scrollbar-gutter: stable; }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
