@@ -221,6 +221,37 @@ def verify(fpk: str):
     log("✓ 校验通过")
 
 
+def sync_source_into_payload():
+    """把仓库源码的应用代码同步进 build/payload 快照。
+
+    ⚠️ payload 是上次打包时准备的快照，若源码改了而不同步，
+    fnpack 会把**旧代码**打进 fpk（v1.2.2 之前踩过：改了模板包里没变）。
+    只覆盖文件、不删除 payload 独有内容（runtime.tar / ui / __pycache__ 等）。
+    """
+    log("同步源码 → build/payload …")
+    dirs = ("app", "har", "plugins", "templates")
+    files = ("captcha.py", "updater.py", "version.json", "requirements.txt")
+    for d in dirs:
+        s_root = os.path.join(ROOT, d)
+        d_root = os.path.join(PAYLOAD, d)
+        if not os.path.isdir(s_root):
+            continue
+        for cur, _dirs, fnames in os.walk(s_root):
+            if "__pycache__" in cur:
+                continue
+            rel = os.path.relpath(cur, s_root)
+            target = os.path.join(d_root, rel) if rel != "." else d_root
+            os.makedirs(target, exist_ok=True)
+            for fn in fnames:
+                if fn == "__pycache__":
+                    continue
+                shutil.copy2(os.path.join(cur, fn), os.path.join(target, fn))
+    for f in files:
+        s = os.path.join(ROOT, f)
+        if os.path.isfile(s):
+            shutil.copy2(s, os.path.join(PAYLOAD, f))
+
+
 def main():
     exe = find_fnpack()
     version = read_version()
@@ -230,6 +261,7 @@ def main():
             f"载荷目录不存在: {PAYLOAD}\n"
             "请先跑 build_fpk.py 的 stage_payload()（或另行准备 app/ 内容）"
         )
+    sync_source_into_payload()
     stage_project(version)
     fpk = run_fnpack(exe, SRC)
     verify(fpk)
