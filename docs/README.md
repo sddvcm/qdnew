@@ -510,6 +510,7 @@ tasks (N) >----< (N) notify_configs  (via task_notify)
 plugins/
 ├── base.py          # 基类（不要修改）
 ├── fuliba.py        # 福利吧签到
+├── huangguaba.py    # 黄瓜吧签到
 └── your_plugin.py   # 你的新插件
 ```
 

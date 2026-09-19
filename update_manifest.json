@@ -1,8 +1,8 @@
 {
   "name": "checkin-system",
-  "version": "1.6.5",
+  "version": "1.7.0",
   "released_at": "2026-09-19",
-  "notes": "修复设置页切换分页时内容区上下跳动（给内容区稳定最小高度）；静态资源加版本参数，解决更新后浏览器沿用缓存旧样式导致「改了没生效」的问题",
+  "notes": "新增黄瓜吧 (huangguaba.com) 签到插件：站点为自研 CMS（非 Discuz），需账号密码或 Cookie；验证码为算术题文本，插件自动计算作答，无需打码；支持 Cookie 失效自动回退账号密码重登并回写 Cookie",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "3be5458f97c1874ce3c7a20330adb15d7660bf42d40fdc39460c55920492a10e",
@@ -30,7 +30,7 @@
     "app/static/js/app.js": "f24035819e06961c487a1df0bc2712f5fe02d4aeab1f04008557d1a65478c439",
     "docs/DEPLOY-FNOS.md": "5821bf5a21d62544caf8c4bfc10abbb2ecdb07050ed5660c5c75b95534cc8328",
     "docs/hyperdown-handoff.md": "d9e983d0a2eed7e147c72d0f4225f31f41c9c1043b48d4c067a72cfcfd95af02",
-    "docs/README.md": "9108bdc9de4620555b8458003d3255d427a653bb9f2389930b354e21be650cf6",
+    "docs/README.md": "23beafaa2446e3461aea6f6db8700e6254338ab49892885717329e0e471a8624",
     "docs/USAGE.md": "91f8b16bbd6451ddb71f023b3f4826649295387aa7dcc87b4fbf7baf5f500a8b",
     "har/engine.py": "3800b84740f18e67ca350ecba0b0f078f57608a00ab1fd314f7f0a85215e2df7",
     "har/parser.py": "62c50c817942ee39d2ebfb25ee10de76601c543ee51c252bb05497d005abe53e",
@@ -39,6 +39,7 @@
     "plugins/base.py": "c79e5c6b8fd8eb7aadd578ce3f8a10b8643b2acf663f0001783ddd741d4ebb57",
     "plugins/fuliba.py": "6ee969bc2172abce0c7a845b59b006dcef03f3eb9eb1ddbd439eb5d2dc287218",
     "plugins/har_template.py": "a00fc946c1e7236d24c8b671f2a3de7b1bb06a239603808d3c78c62829c591b2",
+    "plugins/huangguaba.py": "e4408bf2c206da4d10d8d7474b1dcb4da7d67a766d4b2e23f4f233a85e97561b",
     "plugins/hyperdown.py": "014c89c8723dbd1b8220bf5e0d99f19fc7ebeea6be57f096064ebdd7f395f7b5",
     "plugins/_template.py": "469311361f0d6bcd92c66dd9e6425d72a9f7b2dd06c96ac23ed4489a24e9491f",
     "plugins/__init__.py": "182694fb5e016f78f31c1e0a52c512b47cbce2d17ea67dd962be874e114956db",
@@ -57,6 +58,6 @@
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
     "updater.py": "b89a8fa97fba4ae8f0ede81e5d6301d19817932ed2423d6d65b1d30d69bf613b",
-    "version.json": "c7f457ccc38fac79bf855e8a64c26541f8940a2a143d6f5959b92ecd4190aa7a"
+    "version.json": "1970949042465ccda143c590fa6440e9e44e1b6352a57548164a93374e97bf19"
   }
 }
