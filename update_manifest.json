@@ -50,7 +50,7 @@
     "templates/settings.html": "a3155bc2e8c3a4a169d255e850181ea05b066ed4de2be903c5cda8594bc324ca",
     "templates/task_form.html": "ce432baf6076eeece990d15b7dbe2fe838f27f8d9b3250fb00331473284578d7",
     ".env.example": "dd2d7cd04bf50554183da61460b66b4cb4811776f312af2a46739fbb3d1ec338",
-    "DEVELOPMENT.md": "ef5cd71c00b9256b5eae22513872f9ab35bfa6144ad249165120cba8ca2dab2d",
+    "DEVELOPMENT.md": "9d3b4d67de6c6118c3859d3b04776ca76dc8c0cde23254e626e0fdb3ec99534e",
     "README.md": "7c89f6263d9a8573b5d4dae31fce8f151c1ee36b46fa129b747cc6fdf7e44c66",
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",

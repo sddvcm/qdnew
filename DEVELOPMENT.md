@@ -745,6 +745,34 @@ fpk 模式下密钥在 `etc/app.env` 生成且**升级不丢**，所以同机升
 
 **目标**：Web 上点一下就能升级，不用重新部署。
 
+**⚠️ 分支解析：绝不调 api.github.com（踩过大坑）**
+
+`normalize_source()` 解析更新源时，**用户没写 `/tree/<分支>` 就直接用 `main`**，
+不发起任何网络请求。
+
+早期实现在这种情况下会调 `https://api.github.com/repos/{owner}/{repo}` 查
+`default_branch` —— 结果用户点「检查更新」报：
+
+```
+403 Client Error: rate limit exceeded for url:
+https://api.github.com/repos/sddvcm/qdnew
+```
+
+根因：GitHub 对**未认证**请求限流只有 **60 次/小时，且按出口 IP 计**。
+用户走代理时出口是共享节点，很容易被别人跑满。而这个 API 调用**完全没有必要**。
+
+现行策略（保留此顺序）：
+1. URL 里写了 `/tree/xxx` → 用它（用户说了算）
+2. 没写 → **直接用 `main`**，零网络请求
+3. 只有 `main` 下读不到清单时，才用 **raw 请求**兜底探测 `master`
+   （raw 域名不计 API 额度）→ `probe_branch()`
+
+源码里带 `branch_guessed` 标记：只有"分支是猜的"才允许兜底探测。
+
+> 排查口诀：如果代理连通性测试正常（能读到版本号）但「检查更新」失败，
+> 先看错误里有没有 `api.github.com` —— 有就是限流，不该再出现。
+
+
 **协议**：更新源是 GitHub 仓库，根目录需有 `update_manifest.json`：
 
 ```json
