@@ -89,12 +89,14 @@
 
     <div class="section-title">消息推送（可选）</div>
     <div class="form-group">
-      <div id="notifyBinding" class="help-text">读取通知渠道中…</div>
-      <div style="display:flex; gap:18px; margin-top:8px; font-size:13px;">
-        <label style="font-weight:400;"><input type="checkbox" id="notifyOnSuccess" checked> 成功时推送</label>
-        <label style="font-weight:400;"><input type="checkbox" id="notifyOnFailure" checked> 失败时推送</label>
+      <div id="notifyBinding" class="notify-list">读取通知渠道中…</div>
+      <div style="display:flex; gap:18px; margin-top:10px; font-size:13px;">
+        <label style="font-weight:400; display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="notifyOnSuccess" checked> 成功时推送</label>
+        <label style="font-weight:400; display:flex; align-items:center; gap:6px;">
+          <input type="checkbox" id="notifyOnFailure" checked> 失败时推送</label>
       </div>
-      <div class="help-text">
+      <div class="help-text" style="margin-top:8px;">
         没有可选渠道？去 <a href="/settings">系统设置 → 通知推送</a> 新增（如 PushPlus 微信推送）。
       </div>
     </div>
@@ -132,6 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ==================== 消息推送绑定 ====================
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 const NOTIFY_LABELS = {
   pushplus: 'PushPlus（微信）', serverchan: 'Server酱', bark: 'Bark（iOS）',
   dingtalk: '钉钉机器人', wecom: '企业微信机器人', telegram: 'Telegram Bot',
@@ -165,10 +172,10 @@ async function loadNotifyBinding() {
     } catch(e) {}
   }
   box.innerHTML = channels.map(c => `
-    <label style="font-weight:400; display:flex; align-items:center; gap:6px; padding:3px 0;">
+    <label class="notify-item">
       <input type="checkbox" class="notify-check" value="${c.id}" ${bound[c.id] ? 'checked' : ''}>
-      ${c.name || (NOTIFY_LABELS[c.notify_type] || c.notify_type)}
-      <span style="color:var(--text-muted); font-size:11px;">${NOTIFY_LABELS[c.notify_type] || c.notify_type}</span>
+      ${esc(c.name || (NOTIFY_LABELS[c.notify_type] || c.notify_type))}
+      <span class="notify-type-tag">${esc(NOTIFY_LABELS[c.notify_type] || c.notify_type)}</span>
     </label>`).join('');
 }
 

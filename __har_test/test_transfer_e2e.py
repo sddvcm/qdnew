@@ -296,6 +296,26 @@ check("9.7 div 标签配平",
 check("9.8 含环境信息分页", 'data-pane="env"' in html and "loadEnv" in html)
 
 print()
+print("9A. 消息推送区布局（v1.6.1 修的错位回归）")
+# 根因：app.css 的 `.form-group input {width:100%}` 把 checkbox 也拉成整行宽，
+# 文字全被挤到下一行（用户截图确认过）。这两条断言锁住修复，防止被误删。
+_css = io.open(os.path.join(ROOT, "app", "static", "css", "app.css"),
+               encoding="utf-8").read()
+check("9A.1 CSS 有 checkbox 宽度回退（错位根修）",
+      'input[type="checkbox"], .form-group input[type="radio"]' in _css
+      and "width: auto" in _css)
+check("9A.2 CSS 有 .notify-item 渠道 chip 样式",
+      ".notify-item" in _css and ".notify-list" in _css)
+# 渠道列表容器必须是 notify-list（曾经错用 help-text）
+import io  # noqa: E402
+r = c2.get("/task/add")
+_check_html = r.get_data(as_text=True)
+check("9A.3 表单渠道容器用 notify-list",
+      'id="notifyBinding" class="notify-list"' in _check_html)
+check("9A.4 旧的渠道 chip 内联样式已移除（padding:3px 0 那版）",
+      'gap:6px; padding:3px 0;' not in _check_html)
+
+print()
 print("10. 空库导出 / 空包导入")
 fresh_db()
 app3 = create_app(); app3.config["TESTING"] = True

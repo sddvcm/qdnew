@@ -1,8 +1,8 @@
 {
   "name": "checkin-system",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "released_at": "2026-09-19",
-  "notes": "按飞牛官方 data-share 机制重做数据目录：共享目录取径增加官方软链入口（/var/apps/<应用>/share/<应用>），不再只依赖 TRIM_DATA_SHARE_PATHS 环境变量，常驻进程也能正确定位；新增「环境信息」设置分页，直观显示数据落点、来源、可写性与共享目录探测结果；接入飞牛官方开放 API 读取系统信息（只声明实际用到的 scope）",
+  "notes": "修复任务表单「消息推送」区样式错位：全局 CSS 的 width:100% 误伤了复选框（被拉成整行宽、文字挤到下一行），现已回退自然宽度；通知渠道改为卡片式勾选（选中有高亮边框），长渠道名自动截断不撑破布局",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "3be5458f97c1874ce3c7a20330adb15d7660bf42d40fdc39460c55920492a10e",
@@ -25,7 +25,7 @@
     "app/routes/transfer_api.py": "6242bd446d99de85f0b38df728f57ed1e747794c7895d38ab50d2587a307fe5c",
     "app/routes/update_api.py": "8c6ba287017ccbf68559710d62d8ff6266c476a17285d10cf10b7c1bd87807ba",
     "app/routes/__init__.py": "2231d15749360cdc2f16b10779b9ac5e206f9884c4f274149ec474ee1f6d5645",
-    "app/static/css/app.css": "d078575ec79d445489547168103f0c6b49a172a125af488f065cd8962e755927",
+    "app/static/css/app.css": "07e1814071e60141ef8c62514dbc981c2527c454dabe8b3fd439d7c4fa57d10a",
     "app/static/js/app.js": "f24035819e06961c487a1df0bc2712f5fe02d4aeab1f04008557d1a65478c439",
     "docs/DEPLOY-FNOS.md": "5821bf5a21d62544caf8c4bfc10abbb2ecdb07050ed5660c5c75b95534cc8328",
     "docs/hyperdown-handoff.md": "d9e983d0a2eed7e147c72d0f4225f31f41c9c1043b48d4c067a72cfcfd95af02",
@@ -49,13 +49,13 @@
     "templates/index.html": "c353c38935f04eb2d865b613e4c78867c4df59f34635a99ab37e5eb42662c61a",
     "templates/plugin_import.html": "6ff9455f5bd2cb6963fade2537a90d2db5bec9dec8613c0d2d954d755413a9ec",
     "templates/settings.html": "125999d2ec4169dfbf3b885a825bffe6cdd87bc9c8608713ffd442228323ff97",
-    "templates/task_form.html": "ce432baf6076eeece990d15b7dbe2fe838f27f8d9b3250fb00331473284578d7",
+    "templates/task_form.html": "cf0b63d5640a9a5cb6fff751a85036b0fcddbae452a3fdf269437ba5ff4a91bb",
     ".env.example": "dd2d7cd04bf50554183da61460b66b4cb4811776f312af2a46739fbb3d1ec338",
     "DEVELOPMENT.md": "4a88e63895d3f77976364d349fe77a6270d6c05ac1cca56af221a603c73f5806",
     "README.md": "7c89f6263d9a8573b5d4dae31fce8f151c1ee36b46fa129b747cc6fdf7e44c66",
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
     "updater.py": "e8f59a2de5fda21311dd42a587cc41afe954496431b6db9ac303d57fa6f937c0",
-    "version.json": "9dbe544b18722335aca17f761f136572a65b4b4f9f268f737dfca342ceb7e435"
+    "version.json": "0c528ee966a943a615d284d92c2dc88f76ab2ec359668b346490a7fdd5a766b6"
   }
 }
