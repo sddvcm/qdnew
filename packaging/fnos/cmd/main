@@ -11,6 +11,11 @@ start_app() {
     ensure_dirs
     # 老版本数据在私有目录 —— 若共享目录可用则搬过去（幂等）
     migrate_legacy_data
+    # ★ 清字节码缓存：在线更新换了 .py 但 .pyc 可能仍是旧的，
+    #   Python 靠 mtime+size 判断缓存有效性，秒级精度下小改动会误判 →
+    #   按旧字节码执行、新源码不生效 → 启动即崩（用户实测踩过）。
+    #   启动前清一次，保证每次都是新代码。
+    purge_pycache
     if is_running; then
         log_msg "start: 已在运行"
         return 0
@@ -27,12 +32,24 @@ start_app() {
     log_msg "start: 数据目录=$DATA_ROOT（来源=$DATA_ROOT_SRC）"
     log_msg "start: 启动 (port=${APP_PORT:-$DEFAULT_PORT})"
     cd "$APP_DIR" || return 1
+
+    # ⚠️ 两个关键点，缺一个都会造成"日志文件是空的"（用户实际踩过）：
+    #
+    # 1. `PYTHONUNBUFFERED=1`
+    #    重定向到文件时 Python 的 stdout 是**块缓冲**（4/8KB）。进程启动到
+    #    一半崩了、或输出不足一个缓冲区时，内容**根本不会落盘** → 日志 0 字节。
+    #    上报错信息也就没了，用户看到"启动失败"却无任何线索。
+    #
+    # 2. `-u` 同样效果（双保险，环境变量在 nohup 下有时继承不到）
+    #    另外把 stderr 也并进来，Werkzeug 的启动/异常栈都在 stderr。
     PORT="${APP_PORT:-$DEFAULT_PORT}" \
     CHECKIN_SECRET_KEY="${CHECKIN_SECRET_KEY:-}" \
     CHECKIN_DATA_DIR="$DATA_DIR" \
     CHECKIN_DATA_DIR_SRC="$DATA_ROOT_SRC" \
     CHECKIN_USER_PLUGINS_DIR="$USER_PLUGINS_DIR" \
-    nohup "$PY_BIN" -m app.main >> "$LOG_FILE" 2>&1 &
+    CHECKIN_LOG_DIR="$LOG_DIR" \
+    PYTHONUNBUFFERED=1 \
+    nohup "$PY_BIN" -u -m app.main >> "$LOG_FILE" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_FILE"
 
@@ -40,8 +57,15 @@ start_app() {
     local i=0
     while [ $i -lt 10 ]; do
         if ! kill -0 "$pid" 2>/dev/null; then
-            log_msg "start: 进程启动即退出，查看 $LOG_FILE"
-            echo "应用启动失败，请到 $LOG_DIR 查看日志。" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+            log_msg "start: 进程启动即退出（详见 $LOG_FILE）"
+            # 把日志末尾带给用户 —— 装机失败提示里只说"去看日志"，
+            # 用户还得自己去翻；直接给最后几行能省一轮来回。
+            local tail_log=""
+            [ -f "$LOG_FILE" ] && tail_log=$(tail -n 15 "$LOG_FILE" 2>/dev/null)
+            {
+                echo "应用启动失败。日志：$LOG_FILE"
+                [ -n "$tail_log" ] && { echo "---- 日志末尾 ----"; echo "$tail_log"; }
+            } > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
             rm -f "$PID_FILE"
             return 1
         fi

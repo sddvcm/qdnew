@@ -1243,6 +1243,15 @@ function renderEnv(d) {
   if (dt.total_mb) {
     row('可用空间', `${dt.free_mb} MB / 共 ${dt.total_mb} MB`);
   }
+  // 日志位置 —— 出问题时用户要知道去哪找、有没有内容
+  if (dt.log_file) {
+    const sz = dt.log_size_kb || 0;
+    row('日志文件',
+        `<code style="font-family:var(--mono);">${esc(dt.log_file)}</code>`
+        + (sz > 0
+            ? `　<span style="color:var(--text-muted);">${sz} KB</span>`
+            : '　<span style="color:#b45309;">（暂无内容）</span>'));
+  }
 
   // 共享目录探测明细：把候选路径逐个列出来，方便定位是哪一环没接上
   const links = dt.share_links || [];

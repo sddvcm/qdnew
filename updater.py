@@ -360,6 +360,40 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _purge_pycache(root: str = None) -> int:
+    """删掉代码目录下所有 __pycache__ 目录，返回删除数量。
+
+    ★ 为什么更新后必须做这件事（用户实测踩坑）：
+    更新用 os.replace() 原子替换 .py，但旧 .pyc 还在。Python 判断缓存是否
+    有效靠「源文件 mtime + size」，mtime 只有**秒级精度** —— 小改动在同一秒
+    内完成时，新 .py 的 mtime/size 可能恰好与 .pyc 记录的一致，解释器便认为
+    缓存有效，**按旧字节码执行而磁盘上是新源码** →
+    ImportError / TypeError（旧签名调新函数）→ 重启即崩，
+    且报错栈与源码对不上，极难排查。
+
+    删掉是唯一可靠解法，代价只是首次启动多编译几十毫秒。
+    只删 __pycache__，**绝不碰源码与其他目录**；删不掉也不影响更新成功。
+    """
+    root = root or ROOT
+    count = 0
+    try:
+        for dirpath, dirnames, _ in os.walk(root):
+            # 不下钻进这些大而无意义的目录
+            dirnames[:] = [d for d in dirnames
+                           if d not in (".git", "data", "runtime", "node_modules",
+                                        "backups", "user_plugins", "logs")]
+            if os.path.basename(dirpath) == "__pycache__":
+                dirnames[:] = []
+                try:
+                    shutil.rmtree(dirpath)
+                    count += 1
+                except OSError:
+                    pass
+    except Exception:                           # noqa: BLE001
+        pass
+    return count
+
+
 def _hash_content(data: bytes) -> str:
     """对"文本内容"算哈希 —— **统一按 LF 归一化后再算**。
 
@@ -509,11 +543,27 @@ def run_update(source: str, allow_downgrade: bool = False,
         except OSError as e:
             out["skipped"].append(f"version.json 写入失败：{e}")
 
+        # ---- 阶段 5：清理 __pycache__（关键，别删）----
+        # 用户实测：1.6.0 在线更新到 1.6.1 后一重启就起不来。
+        #
+        # 根因：更新用 os.replace() 原子替换 .py，但**旧 .pyc 还留着**。
+        # Python 判断缓存是否有效靠「源文件 mtime + size」，而 mtime 只有
+        # 秒级精度 —— 小改动（改几行、甚至只改模板但顺手动了 py）在同一秒内
+        # 完成时，新 .py 的 mtime/size 可能**恰好与 .pyc 里记录的一致**，
+        # 解释器就认为缓存有效，于是**按旧字节码执行、磁盘上却是新源码**。
+        # 后果：ImportError / TypeError（旧签名调用新函数）→ 启动即崩，
+        # 而且报错栈看起来跟源码完全对不上，极难排查。
+        #
+        # 直接删掉所有 __pycache__ 是唯一可靠的做法：让 Python 重新编译。
+        # 代价只是首次启动多花几十毫秒。
+        purged = _purge_pycache()
+
         out.update({
             "updated": True,
             "version": latest,
             "files": written,
             "backup_dir": os.path.relpath(backup_dir, ROOT).replace("\\", "/"),
+            "pycache_purged": purged,
         })
         _report("done", len(written), len(written), f"已更新到 {latest}")
     except UpdateError as e:

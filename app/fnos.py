@@ -146,6 +146,16 @@ def data_health() -> dict:
         info["total_mb"] = round(st.f_blocks * st.f_frsize / 1024 / 1024, 1)
     except (OSError, AttributeError):
         pass
+
+    # 日志位置与大小 —— 出问题时用户要知道去哪找、有没有内容
+    from app import logsetup
+    lf = logsetup.log_file()
+    info["log_dir"] = logsetup.log_dir()
+    info["log_file"] = lf
+    try:
+        info["log_size_kb"] = round(os.path.getsize(lf) / 1024, 1)
+    except OSError:
+        info["log_size_kb"] = 0
     return info
 
 

@@ -4,14 +4,29 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+# ⚠️ 日志必须**最先**配置：放在 import Flask 之前，这样连"导入阶段就出错"
+# 的情况（比如某个依赖缺失）也能把栈落到 app.log 里。
+# 原先应用没有任何 logging 配置，启动失败时日志文件是空的，用户只看到
+# 一句"启动失败"毫无线索 —— 用户实际反馈过。
+from app import logsetup
+
+logsetup.setup()
+logsetup.install_excepthook()
+logsetup.startup_banner()
+
+import logging                                          # noqa: E402
+
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 from app.database import init_db
 from app.plugin_loader import load_all_plugins
 from app.scheduler import start, load_all_tasks, shutdown
 import atexit
 
+log = logging.getLogger("app")
+
 
 def create_app():
+    log.info("正在初始化应用…")
     app = Flask(__name__,
                 template_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates"),
                 static_folder=os.path.join(os.path.dirname(__file__), "static"))
@@ -35,11 +50,15 @@ def create_app():
     from app import extras
     try:
         if extras.apply_all():
-            print("[extras] 已加载本地识别组件包", flush=True)
+            log.info("已加载本地识别组件包")
     except Exception as e:            # noqa: BLE001 —— 组件坏了不该阻止启动
-        print(f"[extras] 加载组件包失败（忽略）：{e}", flush=True)
+        log.warning("加载组件包失败（忽略）：%s", e)
 
-    load_all_plugins()
+    try:
+        load_all_plugins()
+    except Exception:
+        log.exception("加载插件失败")
+        raise
     start()
     load_all_tasks()
     atexit.register(shutdown)
@@ -69,6 +88,8 @@ def create_app():
 
     global _APP_INSTANCE
     _APP_INSTANCE = app
+    log.info("应用初始化完成（端口 %s，日志 %s）",
+             os.environ.get("PORT", 5800), logsetup.log_file())
     return app
 
 

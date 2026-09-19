@@ -116,6 +116,9 @@ def run_common(tmp, pkgvar, share_paths=None, apps_dir=None):
         'echo "DATA_ROOT_SRC=$DATA_ROOT_SRC"\n'
         'echo "DATA_DIR=$DATA_DIR"\n'
         'echo "USER_PLUGINS_DIR=$USER_PLUGINS_DIR"\n'
+        'echo "LOG_DIR=$LOG_DIR"\n'
+        'echo "LOG_FILE=$LOG_FILE"\n'
+        'echo "PID_FILE=$PID_FILE"\n'
         'echo "FALLBACK_ROOT=$FALLBACK_ROOT"\n'
         'ensure_dirs\n'
     ) % (CMD, override)
@@ -249,6 +252,55 @@ def _run_all():
                    cwd=CMD)
     with io.open(new_db) as f:
         check("8.2 新数据未被旧数据覆盖", f.read() == "NEW")
+
+    print()
+    print("9. 日志与 PID 落在共享目录（用户可见）")
+    # 用户反馈：日志原来在 @appdata（文件管理器看不到），且文件是空的
+    # ⚠️ 必须**重新跑一次**拿干净结果：上面的 d 是第 4 步（共享目录=vol2）
+    #    留下的，拿它跟 share_ok(vol1) 比会误报。这类"变量串用"是测试老坑。
+    r9 = run_common(tmp, pkgvar, share_paths=posix(share_ok))
+    d9 = parse(r9)
+    check("9.1 LOG_DIR 在共享目录下",
+          _same(d9.get("LOG_DIR"), os.path.join(share_ok, "logs")),
+          d9.get("LOG_DIR"))
+    check("9.2 LOG_FILE = LOG_DIR/app.log",
+          (d9.get("LOG_FILE") or "").endswith("/logs/app.log"),
+          d9.get("LOG_FILE"))
+    check("9.3 PID_FILE 也在共享目录",
+          _same(d9.get("PID_FILE"), os.path.join(share_ok, "app.pid")),
+          d9.get("PID_FILE"))
+    check("9.4 不再落在 @appdata",
+          "@appdata" not in (d9.get("LOG_DIR") or ""), d9.get("LOG_DIR"))
+
+    print()
+    print("10. 共享目录不可用时，日志跟着回退私有目录（不能丢日志）")
+    r = run_common(tmp, pkgvar, share_paths=None)
+    d2 = parse(r)
+    check("10.1 LOG_DIR 回退到私有目录",
+          _same(d2.get("LOG_DIR"), os.path.join(fallback, "logs")),
+          d2.get("LOG_DIR"))
+    check("10.2 rc=0 不崩", r.returncode == 0, r.stderr[:150])
+
+    print()
+    print("11. fix_ownership 空 SHARE_ROOT 不误伤（关键：chown 空参数会指向当前目录）")
+    # 构造 SHARE_ROOT 为空的环境，跑一遍 fix_ownership，确认没报错
+    env2 = os.environ.copy()
+    env2.update({
+        "TRIM_APPDEST": posix(os.path.join(tmp, "appdest", "checkin-system")),
+        "TRIM_PKGVAR": pkgvar, "TRIM_PKGETC": posix(os.path.join(tmp, "etc")),
+        "TRIM_USERNAME": "", "TRIM_GROUPNAME": "",
+    })
+    env2.pop("TRIM_DATA_SHARE_PATHS", None)
+    s2 = (f'source "{CMD}/common.sh"\n'
+          f'echo "SHARE_ROOT=[$SHARE_ROOT]"\n'
+          f'fix_ownership\n'
+          f'echo "RC=$?"\n')
+    r2 = subprocess.run([BASH, "-c", s2], capture_output=True, text=True,
+                        env=env2, cwd=CMD)
+    check("11.1 空 SHARE_ROOT 时 fix_ownership 正常返回",
+          "RC=0" in (r2.stdout or ""), (r2.stdout or "")[:150])
+    check("11.2 无异常输出",
+          "unbound" not in (r2.stderr or "").lower(), (r2.stderr or "")[:150])
 
     print()
     print("=" * 62)

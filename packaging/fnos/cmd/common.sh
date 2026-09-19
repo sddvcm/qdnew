@@ -9,9 +9,6 @@ APP_DIR="${TRIM_APPDEST}"
 VAR_DIR="${TRIM_PKGVAR}"
 ETC_DIR="${TRIM_PKGETC}"
 ENV_FILE="${ETC_DIR}/app.env"
-LOG_DIR="${VAR_DIR}/logs"
-LOG_FILE="${LOG_DIR}/app.log"
-PID_FILE="${VAR_DIR}/app.pid"
 RUNTIME_DIR="${APP_DIR}/runtime"
 RUNTIME_TAR="${APP_DIR}/runtime.tar"
 PY_BIN="${RUNTIME_DIR}/bin/python3"
@@ -116,12 +113,43 @@ DATA_DIR="${DATA_ROOT}/data"
 USER_PLUGINS_DIR="${DATA_ROOT}/user_plugins"
 BACKUP_DIR="${DATA_DIR}/backups"          # 与 updater.py 的 DATA_DIR/backups 一致
 
+# ---- 清理 Python 字节码缓存 ----
+# ★ 血泪教训：用户从 1.6.0 在线更新到 1.6.1 后，**一重启就起不来**。
+# 根因是更新用 os.replace() 原子替换 .py，但旧 .pyc 还留着；Python 判断
+# 缓存有效性靠「源文件 mtime + size」，而 mtime 只有**秒级精度** ——
+# 小改动在同一秒内完成时，新 .py 的 mtime/size 可能恰好与 .pyc 记录的一致，
+# 解释器便认为缓存有效，**按旧字节码执行而磁盘上是新源码** →
+# ImportError / TypeError（旧签名调新函数）→ 启动即崩，且报错与源码对不上。
+#
+# 启动前清一次是最稳的兜底：不管更新流程有没有清干净，重启后一定是新代码。
+# 代价仅是首次启动多编译几十毫秒，完全可以接受。
+purge_pycache() {
+    [ -d "$APP_DIR" ] || return 0
+    local n
+    n=$(find "$APP_DIR" -type d -name __pycache__ 2>/dev/null | wc -l)
+    [ "$n" -gt 0 ] || return 0
+    find "$APP_DIR" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null
+    log_msg "已清理 $n 个 __pycache__（避免旧字节码导致启动异常）"
+}
+
+# 日志与 PID（放在用户可见的共享目录里）
+# ⚠️ 原先在 VAR_DIR(@appdata)，用户反馈"日志找不到、里面也没有内容"：
+#   ①@appdata 在文件管理器里看不到，出问题时根本不知道去哪找；
+#   ②更关键的是**日志文件是空的** —— 见 main 里的缓冲问题。
+# 现在跟着数据一起落在共享目录，用户能直接打开看、方便反馈。
+# 兜底：DATA_ROOT 不可写时退回私有目录，保证日志功能始终可用。
+LOG_DIR="${DATA_ROOT}/logs"
+LOG_FILE="${LOG_DIR}/app.log"
+INSTALL_LOG="${LOG_DIR}/install.log"
+PID_FILE="${DATA_ROOT}/app.pid"
+
 log_msg() {
     mkdir -p "$LOG_DIR" 2>/dev/null
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [$1]" >> "$LOG_DIR/install.log" 2>/dev/null
+    echo "$(date '+%Y-%m-%d %H:%M:%S') [$1]" >> "$INSTALL_LOG" 2>/dev/null
 }
 
 # 初始化目录结构（幂等，安装/升级/启动都可重复调用）
+# 日志与 PID 现在也在 DATA_ROOT 下（共享目录），一起建。
 ensure_dirs() {
     mkdir -p "$LOG_DIR" "$DATA_DIR" "$USER_PLUGINS_DIR" "$BACKUP_DIR" \
              "$ETC_DIR" 2>/dev/null
@@ -132,7 +160,9 @@ ensure_dirs() {
 migrate_legacy_data() {
     local item src dst base moved skipped
     [ "$DATA_ROOT" = "$VAR_DIR" ] && return 0      # 已在私有目录，无需迁移
-    for item in data user_plugins backups; do
+    # logs 也一起搬：老版本日志写在 @appdata 里，用户看不到；
+    # 新版本挪到共享目录，把历史日志带过去免得"日志凭空消失"。
+    for item in data user_plugins backups logs; do
         src="${VAR_DIR}/${item}"
         dst="${DATA_ROOT}/${item}"
         [ -d "$src" ] || continue
@@ -181,7 +211,7 @@ extract_runtime() {
     # GNU tar 会把 `C:/xxx` 这类含冒号的路径当成 `主机:路径` 远程语法
     # （报 "Cannot connect to C: resolve failed"）。fnOS 上是 POSIX 路径
     # 虽不会触发，但相对路径写法在所有 tar 实现上都安全，测试环境也能跑通。
-    if ! (cd "$APP_DIR" && tar -xf runtime.tar) 2>>"$LOG_DIR/install.log"; then
+    if ! (cd "$APP_DIR" && tar -xf runtime.tar) 2>>"$INSTALL_LOG"; then
         log_msg "ERROR: 运行时解压失败"
         echo "内置运行时解压失败，请检查磁盘空间（需要约 400MB 可用）。" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
         return 1
@@ -231,12 +261,31 @@ EOF
 
 # 修正归属：以 root 执行安装时，把应用目录交给包用户，
 # 否则「程序内自动更新」（以包用户身份运行）将无法写代码文件。
+#
+# ⚠️ 三个必须防的坑：
+# 1. `$SHARE_ROOT` 可能为空（未声明 data-share 或探测失败）——
+#    直接传入空串会让 chown 把**当前目录**当参数，改动范围不可控。
+#    所以只收集非空且存在的路径。
+# 2. 共享目录可能是**软链**：`chown -R` 默认跟随命令行上的软链，
+#    会把目标目录（@appshare 下的真实路径）整棵树改归属。
+#    这里显式用 `-h` 对软链本身操作，避免波及目录外的东西。
+# 3. 目录不存在时 chown 会报错刷屏，先判存在。
 fix_ownership() {
-    if [ "$(id -u)" = "0" ] && [ -n "$TRIM_USERNAME" ]; then
-        chown -R "$TRIM_USERNAME:$TRIM_GROUPNAME" \
-            "$APP_DIR" "$VAR_DIR" "$ETC_DIR" "$SHARE_ROOT" 2>/dev/null
-        log_msg "已修正目录归属: $TRIM_USERNAME:$TRIM_GROUPNAME"
-    fi
+    [ "$(id -u)" = "0" ] || return 0
+    [ -n "$TRIM_USERNAME" ] || return 0
+
+    local own="${TRIM_USERNAME}:${TRIM_GROUPNAME}"
+    local p
+    for p in "$APP_DIR" "$VAR_DIR" "$ETC_DIR" "$DATA_ROOT"; do
+        [ -n "$p" ] && [ -e "$p" ] || continue
+        # 软链只改链接本身，不跟随；实体目录正常递归
+        if [ -L "$p" ]; then
+            chown -h "$own" "$p" 2>/dev/null
+        else
+            chown -R "$own" "$p" 2>/dev/null
+        fi
+    done
+    log_msg "已修正目录归属: $own（APP/VAR/ETC/DATA_ROOT）"
 }
 
 # 进程管理
