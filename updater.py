@@ -100,6 +100,23 @@ ALLOWED_ROOT_FILES = {
 NEVER_OVERWRITE = {".env", "update_manifest.json"}
 
 
+def _build_proxies(proxy: Optional[str]) -> Optional[Dict[str, str]]:
+    """把用户填的代理地址整理成 requests 的 proxies 字典。
+
+    空字符串 / None → 返回 None（走直连，保持默认行为）。
+    用户可填 `http://192.168.2.100:7897` 或省略协议只填 `192.168.2.100:7897`
+    （自动补 http://）。HTTP / HTTPS 统一走同一代理。
+    """
+    if not proxy:
+        return None
+    p = str(proxy).strip()
+    if not p:
+        return None
+    if not re.match(r"^https?://", p, re.I):
+        p = "http://" + p
+    return {"http": p, "https": p}
+
+
 class UpdateError(Exception):
     """更新失败（消息面向用户，可直接展示）"""
 
@@ -145,7 +162,7 @@ def _assert_allowed_url(url: str):
         )
 
 
-def normalize_source(source: str) -> Dict:
+def normalize_source(source: str, proxy: Optional[str] = None) -> Dict:
     """把用户填的源地址规范成 {owner, repo, branch, raw_base, api_base}。
 
     支持三种填法：
@@ -173,7 +190,7 @@ def normalize_source(source: str) -> Dict:
         _assert_allowed_url(api)
         try:
             resp = requests.get(api, headers={"User-Agent": "checkin-system"},
-                                timeout=15)
+                                timeout=15, proxies=_build_proxies(proxy))
             if resp.status_code == 404:
                 raise UpdateError(f"仓库不存在或未公开：{owner}/{repo}")
             resp.raise_for_status()
@@ -190,10 +207,12 @@ def normalize_source(source: str) -> Dict:
     }
 
 
-def _fetch_raw(src: Dict, path: str, timeout: int = 20) -> Optional[bytes]:
+def _fetch_raw(src: Dict, path: str, timeout: int = 20,
+               proxy: Optional[str] = None) -> Optional[bytes]:
     url = f"{src['raw_base']}/{path.lstrip('/')}"
     _assert_allowed_url(url)
-    resp = requests.get(url, headers={"User-Agent": "checkin-system"}, timeout=timeout)
+    resp = requests.get(url, headers={"User-Agent": "checkin-system"},
+                        timeout=timeout, proxies=_build_proxies(proxy))
     if resp.status_code == 404:
         return None
     resp.raise_for_status()
@@ -202,7 +221,7 @@ def _fetch_raw(src: Dict, path: str, timeout: int = 20) -> Optional[bytes]:
 
 # ============================ 检查更新 ============================
 
-def check_update(source: str) -> Dict:
+def check_update(source: str, proxy: Optional[str] = None) -> Dict:
     """检查是否有新版本。返回给前端的结构（不抛异常，失败也在结构里）"""
     local = current_version()
     result = {
@@ -216,9 +235,9 @@ def check_update(source: str) -> Dict:
         "error": "",
     }
     try:
-        src = normalize_source(source)
+        src = normalize_source(source, proxy=proxy)
         result["web_url"] = src["web_url"]
-        raw = _fetch_raw(src, MANIFEST_NAME)
+        raw = _fetch_raw(src, MANIFEST_NAME, proxy=proxy)
         if raw is None:
             result["error"] = (
                 f"仓库里找不到 {MANIFEST_NAME}。\n"
@@ -300,7 +319,8 @@ def _sha256(data: bytes) -> str:
 
 # ============================ 执行更新 ============================
 
-def run_update(source: str, allow_downgrade: bool = False) -> Dict:
+def run_update(source: str, allow_downgrade: bool = False,
+               proxy: Optional[str] = None) -> Dict:
     """执行更新：下载 → 校验 → 备份 → 写入。
 
     返回结构含 `updated` / `files` / `backup_dir` / `error`。
@@ -309,8 +329,8 @@ def run_update(source: str, allow_downgrade: bool = False) -> Dict:
     out = {"updated": False, "version": "", "files": [], "backup_dir": "",
            "skipped": [], "error": ""}
     try:
-        src = normalize_source(source)
-        raw = _fetch_raw(src, MANIFEST_NAME)
+        src = normalize_source(source, proxy=proxy)
+        raw = _fetch_raw(src, MANIFEST_NAME, proxy=proxy)
         if raw is None:
             raise UpdateError(f"仓库里找不到 {MANIFEST_NAME}")
         manifest = json.loads(raw.decode("utf-8"))
@@ -336,7 +356,7 @@ def run_update(source: str, allow_downgrade: bool = False) -> Dict:
             except UpdateError as e:
                 raise UpdateError(f"清单里的路径非法：{e}") from e
 
-            data = _fetch_raw(src, safe)
+            data = _fetch_raw(src, safe, proxy=proxy)
             if data is None:
                 raise UpdateError(f"远端缺少清单里声明的文件：{safe}")
 
@@ -474,3 +494,31 @@ def build_manifest(version: str, notes: str = "", released_at: str = "") -> Dict
         "notes": notes,
         "files": files,
     }
+
+
+def check_proxy(proxy: str, url: Optional[str] = None) -> Dict:
+    """测试代理能否连通 GitHub 更新源（不落库、不校验白名单）。
+
+    用于设置页「测试代理」按钮：拿着用户刚填的代理地址，尝试拉一次
+    仓库的 update_manifest.json，验证这台机器确实能经此代理访问 GitHub。
+    成功返回 {ok:True, version}；失败返回 {ok:False, error}。
+    """
+    if not proxy or not str(proxy).strip():
+        return {"ok": False, "error": "请先填写代理地址"}
+    test_url = (url or "").strip() or \
+        "https://raw.githubusercontent.com/sddvcm/qdnew/main/update_manifest.json"
+    proxies = _build_proxies(proxy)
+    try:
+        resp = requests.get(test_url, headers={"User-Agent": "checkin-system"},
+                            timeout=20, proxies=proxies)
+        resp.raise_for_status()
+        try:
+            data = resp.json()
+            ver = str(data.get("version") or "")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            ver = ""
+        return {"ok": True, "status": resp.status_code, "version": ver}
+    except requests.RequestException as e:
+        return {"ok": False, "error": f"代理连接失败：{e}"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"测试出错：{e}"}

@@ -28,6 +28,23 @@
     <button class="btn" id="checkBtn" onclick="checkUpdate()">检查更新</button>
   </div>
 
+  <div class="form-group" style="margin-top: 18px;">
+    <label>网络代理（选填，解决 GitHub 连不上）</label>
+    <input type="text" id="proxy" placeholder="http://192.168.2.100:7897">
+    <div class="help-text">
+      当服务器直连 <code>raw.githubusercontent.com</code> 超时（如国内网络）时使用。
+      填你电脑上 Clash / v2rayN 等代理的<strong>局域网地址</strong>（代理软件需开启
+      「允许局域网连接 / Allow LAN」），飞牛才能访问到它。留空则直连。<br>
+      配置后「检查更新 / 立即更新」都会经此代理访问 GitHub。
+    </div>
+  </div>
+
+  <div class="modal-actions" style="justify-content: flex-start; gap: 8px;">
+    <button class="btn" id="saveProxyBtn" onclick="saveProxy()">保存代理</button>
+    <button class="btn" id="testProxyBtn" onclick="testProxy()">测试代理连通性</button>
+    <span id="proxyTestMsg" style="font-size: 12px; color: var(--text-muted);"></span>
+  </div>
+
   <div id="updateResult" style="display: none; margin-top: 18px;"></div>
 
   <div class="form-group" style="margin-top: 22px;">
@@ -103,6 +120,9 @@ async function loadStatus() {
     if (!document.getElementById('source').value && d.source) {
       document.getElementById('source').value = d.source;
     }
+    if (!document.getElementById('proxy').value && d.proxy) {
+      document.getElementById('proxy').value = d.proxy;
+    }
     const box = document.getElementById('backupList');
     if (!d.backups || !d.backups.length) {
       box.textContent = '暂无备份（每次更新前会自动备份）';
@@ -134,6 +154,50 @@ async function saveSource() {
     showToast('success', '已保存');
   } else {
     showToast('error', d.message || '保存失败');
+  }
+}
+
+async function saveProxy() {
+  const proxy = document.getElementById('proxy').value.trim();
+  const r = await fetch('/api/update/proxy', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({proxy}),
+  });
+  const d = await r.json();
+  if (d.success) {
+    showToast('success', '代理已保存' + (proxy ? '' : '（已清空，恢复直连）'));
+  } else {
+    showToast('error', d.message || '保存失败');
+  }
+}
+
+async function testProxy() {
+  const proxy = document.getElementById('proxy').value.trim();
+  const msg = document.getElementById('proxyTestMsg');
+  const btn = document.getElementById('testProxyBtn');
+  if (!proxy) { msg.style.color = '#b91c1c'; msg.textContent = '请先填写代理地址'; return; }
+  msg.style.color = 'var(--text-muted)';
+  msg.textContent = '测试中…';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/update/proxy/test', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({proxy}),
+    });
+    const d = await r.json();
+    if (d.success) {
+      const ver = (d.result && d.result.version) ? '，远端版本 ' + d.result.version : '';
+      msg.style.color = '#15803d';
+      msg.textContent = '连接成功' + ver + ' ✓';
+    } else {
+      msg.style.color = '#b91c1c';
+      msg.textContent = '连接失败：' + (d.message || '未知错误');
+    }
+  } catch(e) {
+    msg.style.color = '#b91c1c';
+    msg.textContent = '请求出错：' + e.message;
+  } finally {
+    btn.disabled = false;
   }
 }
 

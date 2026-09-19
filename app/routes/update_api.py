@@ -21,6 +21,7 @@ from app.plugin_loader import load_all_plugins
 bp = Blueprint("update_api", __name__)
 
 SETTING_KEY = "update_source"
+PROXY_KEY = "update_proxy"
 
 
 def _get_source() -> str:
@@ -42,6 +43,25 @@ def _set_source(value: str):
     db.close()
 
 
+def _get_proxy() -> str:
+    db = get_db()
+    row = db.execute("SELECT value FROM system_config WHERE key=?", (PROXY_KEY,)).fetchone()
+    db.close()
+    return (row["value"] if row else "") or ""
+
+
+def _set_proxy(value: str):
+    db = get_db()
+    db.execute(
+        "INSERT INTO system_config (key, value, updated_at) "
+        "VALUES (?,?,datetime('now','localtime')) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+        "updated_at=datetime('now','localtime')",
+        (PROXY_KEY, (value or "").strip()))
+    db.commit()
+    db.close()
+
+
 # ==================== 页面 ====================
 
 @bp.route("/settings")
@@ -56,6 +76,7 @@ def status():
     return jsonify({
         "version": updater.current_version(),
         "source": _get_source(),
+        "proxy": _get_proxy(),
         "backups": updater.list_backups(),
         "allowed_hosts": list(updater.ALLOWED_HOSTS),
     })
@@ -81,13 +102,39 @@ def set_config():
     return jsonify({"success": True, "source": source})
 
 
+@bp.route("/api/update/proxy", methods=["POST"])
+def set_proxy():
+    """保存/清空更新用的代理地址。"""
+    data = request.get_json(silent=True) or {}
+    proxy = (data.get("proxy") or "").strip()
+    _set_proxy(proxy)
+    return jsonify({"success": True, "proxy": proxy})
+
+
+@bp.route("/api/update/proxy/test", methods=["POST"])
+def test_proxy():
+    """测试某代理能否连通 GitHub 更新源（不落库）。
+
+    请求体可带 {proxy} 测刚填的地址；也可不带 proxy，则测已保存的代理。
+    """
+    data = request.get_json(silent=True) or {}
+    proxy = (data.get("proxy") or "").strip() or _get_proxy()
+    if not proxy:
+        return jsonify({"success": False,
+                        "message": "请先填写代理地址，或在请求中带上 proxy"}), 400
+    res = updater.check_proxy(proxy)
+    return jsonify({"success": res.get("ok"), "message": res.get("error") or "",
+                    "result": res})
+
+
 @bp.route("/api/update/check", methods=["POST"])
 def check():
     source = _get_source()
     if not source:
         return jsonify({"success": False, "message": "请先在上方填写更新源仓库地址",
                         "result": None}), 400
-    result = updater.check_update(source)
+    proxy = _get_proxy()
+    result = updater.check_update(source, proxy=proxy or None)
     return jsonify({
         "success": not result.get("error"),
         "message": result.get("error") or "",
@@ -112,8 +159,10 @@ def run():
 
     data = request.get_json(silent=True) or {}
     allow_downgrade = bool(data.get("allow_downgrade"))
+    proxy = _get_proxy()
 
-    result = updater.run_update(source, allow_downgrade=allow_downgrade)
+    result = updater.run_update(source, allow_downgrade=allow_downgrade,
+                                 proxy=proxy or None)
 
     if not result.get("updated"):
         return jsonify({
