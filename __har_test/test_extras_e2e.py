@@ -13,10 +13,15 @@ import tempfile
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+from test_auth_helper import login_client
 os.chdir(ROOT)
 TMP = tempfile.mkdtemp(prefix="extras_e2e_")
 os.environ["CHECKIN_DATA_DIR"] = TMP
 os.environ["CHECKIN_SECRET_KEY"] = "test-secret-key-for-e2e"
+_HERE_FOR_HELPER = os.path.dirname(os.path.abspath(__file__))
+if _HERE_FOR_HELPER not in sys.path:
+    sys.path.insert(0, _HERE_FOR_HELPER)
 sys.path.insert(0, ROOT)
 
 PASS = FAIL = 0
@@ -64,7 +69,7 @@ from app.main import create_app   # noqa: E402
 
 app = create_app()
 app.config["TESTING"] = True
-c = app.test_client()
+c = login_client(app)
 
 print("=" * 60)
 print("1. 初始状态（未装组件）")

@@ -248,15 +248,39 @@ init_env_file() {
     fi
     local secret
     secret=$(gen_random_hex)
+    # ★ 端口：优先用**安装向导里填的**（wizard/install 的 APP_PORT 字段
+    #   会以同名环境变量注入到生命周期脚本），没填才用默认 5800。
+    #   同时校验范围：填了非法值（空、非数字、超范围）就退回默认，
+    #   绝不让一个坏端口把应用卡在「启动中」。
+    local port="${APP_PORT:-}"
+    case "$port" in
+        ''|*[!0-9]*) port="$DEFAULT_PORT" ;;
+    esac
+    if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        log_msg "wizard 端口 $port 不合法，回退默认 $DEFAULT_PORT"
+        port="$DEFAULT_PORT"
+    fi
+
     cat > "$ENV_FILE" << EOF
 # 签到管理系统配置（安装时自动生成）
 # CHECKIN_SECRET_KEY 用于加密任务里的账号密码与 Cookie。
 # ⚠️ 生成后不要修改 —— 修改会导致已保存的密码无法解密。
 CHECKIN_SECRET_KEY=${secret}
-APP_PORT=${DEFAULT_PORT}
+# 管理界面端口（安装向导里可填，改完需重启应用）
+APP_PORT=${port}
 EOF
     chmod 600 "$ENV_FILE" 2>/dev/null
-    log_msg "已生成 app.env（随机密钥）"
+    log_msg "已生成 app.env（随机密钥，端口 ${port}）"
+
+    # ★ 访问密码：向导里填了就直接落成初始密码。
+    #   不落明文 —— 这里只存一份供程序首次启动时读取并转成 PBKDF2 哈希，
+    #   程序启动后会立刻删掉这个文件（见 app/auth_bootstrap.py）。
+    local authpw="${AUTH_PASSWORD:-}"
+    if [ -n "$authpw" ]; then
+        printf '%s' "$authpw" > "${ETC_DIR}/.auth-init"
+        chmod 600 "${ETC_DIR}/.auth-init" 2>/dev/null
+        log_msg "已记录向导设置的访问密码（首次启动写入后自动删除）"
+    fi
 }
 
 # 修正归属：以 root 执行安装时，把应用目录交给包用户，

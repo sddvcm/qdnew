@@ -11,6 +11,11 @@ import sys
 import tempfile
 
 ROOT = r"C:\Users\Administrator\WorkBuddy\自动签到\checkin-system"
+
+from test_auth_helper import login_client
+_HERE_FOR_HELPER = os.path.dirname(os.path.abspath(__file__))
+if _HERE_FOR_HELPER not in sys.path:
+    sys.path.insert(0, _HERE_FOR_HELPER)
 sys.path.insert(0, ROOT)
 
 PASS, FAIL = [], []
@@ -483,7 +488,7 @@ check("3.18 list_backups 返回列表", isinstance(updater.list_backups(), list)
 # 3.19 status 接口 / 设置页
 from app.main import create_app  # noqa: E402
 app = create_app()
-client = app.test_client()
+client = login_client(app)
 r = client.get("/settings")
 check("3.19 设置页可访问", r.status_code == 200 and b"update" in r.data, r.status_code)
 r = client.get("/api/update/status")

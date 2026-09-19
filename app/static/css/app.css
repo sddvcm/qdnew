@@ -243,3 +243,40 @@ tr:hover { background: var(--bg); }
   th, td { padding: 8px 6px; }
   .modal { min-width: unset; width: 95vw; }
 }
+
+/* ============ 安全提示（默认密码未改） ============ */
+/* 顶栏导航上的小红点：不抢注意力，但让人一眼看到该去改密码 */
+.nav-dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: #dc2626;
+  vertical-align: middle;
+}
+
+/* 页面顶部的常驻警示条。刻意用暖色而非红色，避免被当成报错忽略掉。
+   容器是 .container（带左右 padding），这里要跟着对齐，所以用负 margin
+   抵消掉内层缩进。 */
+.global-hint-warn {
+  position: relative;
+  max-width: 1100px;
+  margin: 0 auto 14px;
+  padding: 10px 38px 10px 14px;
+  border-radius: var(--radius);
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+.global-hint-warn a { color: #92400e; text-decoration: underline; }
+.global-hint-close {
+  position: absolute;
+  top: 8px; right: 12px;
+  cursor: pointer;
+  font-size: 13px;
+  opacity: .55;
+  user-select: none;
+}
+.global-hint-close:hover { opacity: 1; }

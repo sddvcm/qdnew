@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 - 签到管理系统</title>
+<link rel="stylesheet" href="/static/css/app.css?v={{ app_version }}">
+<style>
+  .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;
+              padding:20px;box-sizing:border-box;}
+  .login-card{width:100%;max-width:380px;background:var(--card-bg,#fff);
+              border:1px solid var(--border);border-radius:14px;
+              box-shadow:0 6px 28px rgba(0,0,0,.08);padding:30px 28px;}
+  .login-card h1{font-size:19px;margin:0 0 6px;text-align:center;}
+  .login-sub{text-align:center;font-size:12.5px;color:var(--text-muted);
+             margin-bottom:22px;}
+  .login-card .form-group{margin-bottom:16px;}
+  .login-card input[type=password]{width:100%;box-sizing:border-box;
+              height:42px;padding:0 12px;font-size:15px;
+              border:1px solid var(--border);border-radius:8px;
+              background:var(--bg,#fff);color:var(--text,#1f2733);}
+  .login-card input[type=password]:focus{outline:none;
+              border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light);}
+  .login-btn{width:100%;height:44px;font-size:15px;font-weight:600;
+              border-radius:8px;cursor:pointer;}
+  .login-hint{margin-top:16px;font-size:12px;line-height:1.8;
+              color:#92400e;background:#fffbeb;border:1px solid #fde68a;
+              border-radius:8px;padding:10px 12px;}
+  .login-err{margin-top:12px;font-size:13px;color:#b91c1c;min-height:18px;}
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <h1>签到管理系统</h1>
+    <div class="login-sub">请输入访问密码</div>
+
+    <div class="form-group">
+      <input type="password" id="pw" placeholder="访问密码" autofocus
+             autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary login-btn" id="loginBtn" onclick="doLogin()">登 录</button>
+    <div class="login-err" id="err"></div>
+
+    {% if is_default %}
+    <div class="login-hint">
+      当前使用的仍是<strong>默认密码 123456</strong>。登录后请到
+      <strong>系统设置 → 访问密码</strong> 里改掉，避免被外网猜到。
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+const NEXT_URL = {{ (next_url or '')|tojson }};
+
+async function doLogin() {
+  const pw = document.getElementById('pw').value;
+  const btn = document.getElementById('loginBtn');
+  const err = document.getElementById('err');
+  err.textContent = '';
+  if (!pw) { err.textContent = '请输入密码'; return; }
+  btn.disabled = true; btn.textContent = '登录中…';
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw}),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.success) {
+      location.href = NEXT_URL || '/';
+      return;
+    }
+    err.textContent = d.message || '密码错误';
+    document.getElementById('pw').select();
+  } catch(e) {
+    err.textContent = '请求失败：' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '登 录';
+  }
+}
+
+document.getElementById('pw').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+</script>
+</body>
+</html>

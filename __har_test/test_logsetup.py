@@ -14,10 +14,15 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+
+from test_auth_helper import login_client
 TMP = tempfile.mkdtemp(prefix="log_test_")
 os.environ["CHECKIN_LOG_DIR"] = os.path.join(TMP, "logs")
 os.environ["CHECKIN_DATA_DIR"] = TMP
 os.environ["CHECKIN_SECRET_KEY"] = "log-key"
+_HERE_FOR_HELPER = os.path.dirname(os.path.abspath(__file__))
+if _HERE_FOR_HELPER not in sys.path:
+    sys.path.insert(0, _HERE_FOR_HELPER)
 sys.path.insert(0, ROOT)
 
 PASS = FAIL = 0
@@ -173,7 +178,7 @@ print("9. 环境信息接口带日志路径（用户能在界面看到去哪找�
 from app.main import create_app  # noqa: E402
 app = create_app()
 app.config["TESTING"] = True
-c = app.test_client()
+c = login_client(app)
 d = c.get("/api/system/env").get_json()
 dd = d.get("data", {})
 check("9.1 含 log_file", "log_file" in dd, list(dd.keys())[:12])

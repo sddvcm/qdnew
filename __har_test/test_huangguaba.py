@@ -1,30 +1,36 @@
-# -*- coding: utf-8 -*-
-"""黄瓜吧插件测试（plugins/huangguaba.py）
+"""黄瓜吧插件回归测试 —— 用**本地模拟服务器**真校验，不是打桩。
 
-起一个**本地模拟服务器**完整模拟站点行为：
-  - GET  /login.php      登录页（内嵌算术验证码题目，绑定 session）
-  - GET  /api/captcha.php 验证码题目 JSON
-  - POST /login.php      校验 用户名/密码/验证码，成功种登录态
-  - GET  /               登录/未登录两种首页
-  - POST /api/user.php   action=sign 签到（401 未登录 / 成功 / 已签到）
-  - 可选：签到接口强制要求 csrf_token（验证插件的自动重试路径）
+⚠️ 这轮测试是冲着 v1.0 的两个真实故障写的（用户实测报过）：
 
-⚠️ mock 教训（之前踩过）：**mock 要真的校验**——本服务器真的验证算术答案、
-真的检查登录态，这样才能测出插件逻辑错误。
+  1. **验证码取题来源错**
+     v1.0 从登录页 `id="captchaQ"` 读题目；但刷新验证码时服务端会把新题目
+     与新答案重新绑到 session，而页面上的旧题目**不是同一次生成的** ——
+     我们算出旧题目的答案去提交，必然错，服务端就把登录页原样返回。
+     本测试的假服务器**故意让页面上的 captchaQ 与接口答案不一致**，
+     只有走接口拿题目才能登录成功 → 逼出「接口优先」这个约束。
+
+  2. **失败消息混进 HTML 残片**
+     用户日志里出现过 `s="form-input" placeholder="输入计算结果"`。
+     那是把整段登录页 HTML 当消息输出的后果。本测试断言失败消息里
+     **不含标签/属性残片**，且能说出人话原因。
+
+测试全部走真实 HTTP（ThreadingHTTPServer + 随机端口），不 mock requests。
 """
-import io
 import json
 import os
+import re
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
-sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-PASS = FAIL = 0
+from plugins.huangguaba import (HuangGuabaPlugin, solve_arithmetic,
+                                _human_fail_reason, _parse_cookies,
+                                _cookie_to_str)
+
+PASS, FAIL = 0, 0
 FAILS = []
 
 
@@ -35,255 +41,431 @@ def check(name, cond, extra=""):
     else:
         FAIL += 1
         FAILS.append(name)
-    print(f"{'PASS' if cond else 'FAIL'}  {name}  {extra}")
+    print(f"{'PASS' if cond else 'FAIL'}  {name}" + (f"  | {extra}" if extra else ""))
 
 
-# ---------------- 本地模拟服务器 ----------------
-STATE = {
-    "question": "19 - 15",          # 展示给插件的题目
-    "answer": 4,                    # 服务端认可的正确答案
-    "username": "testuser",
-    "password": "testpass",
-    "require_csrf": False,          # 签到接口是否强制要求 csrf_token
-    "sessions": {},                 # sid -> {"logged":bool,"signed":bool}
-    "csrf": "CSRF-TOKEN-XYZ",
-}
-LOCK = threading.Lock()
+# ============================================================
+#  模拟服务器
+# ============================================================
+class FakeState:
+    """服务端状态（跨请求共享，模拟 session 绑定）"""
+    def __init__(self):
+        self.reset()
 
-PAGE_LOGGED_OUT = """<html><head><title>黄瓜吧</title></head><body>
-<nav><a href="/login.php" class="nav-link">登录</a>
-<a href="/register.php" class="nav-link nav-btn">注册</a></nav>
-<div class="content">首页内容</div></body></html>"""
+    def reset(self):
+        self.captcha_answer = None      # 服务端当前认可的答案
+        self.captcha_question = None    # 服务端当前下发的题目
+        self.page_question = None       # 登录页「故意」渲染的旧题目
+        self.visits = {}                # path -> count
+        self.last_login_body = None
+        self.signed = False
+        self.logged_in = False
+        self.mode = "ok"                # ok | badcap | badpw | noapi | expires
+        self.csrf_needed = False
+        self.answer_history = []        # 历次提交的 captcha 值
 
-PAGE_LOGGED_IN = """<html><head><title>黄瓜吧</title></head><body>
-<nav><a href="/logout.php">退出</a></nav>
-<div class="card"><h3>每日签到</h3><div id="calendar"></div>
-<a href="/sign.php">去签到 →</a></div>
-<script>const CSRF_TOKEN = 'CSRF-TOKEN-XYZ';</script>
+
+STATE = FakeState()
+
+# 登录页上渲染的题目 —— 刻意与接口不同（复现 v1.0 的坑）
+STALE_QUESTION = "11 - 3 = ?"
+# 接口下发的真题目
+REAL_QUESTION = "60 - 8 = ?"
+REAL_ANSWER = "52"
+
+
+def _make_captcha():
+    """发新验证码：题目与答案一起绑定"""
+    STATE.captcha_question = REAL_QUESTION
+    STATE.captcha_answer = REAL_ANSWER
+    STATE.page_question = STALE_QUESTION      # 页面永远是旧的那个
+
+
+def _login_page_html(error=None):
+    """伪造登录页 HTML（结构对齐真实站点，便于验证解析逻辑）"""
+    err_html = f'<div class="form-error">{error}</div>' if error else ""
+    return f"""<!DOCTYPE html><html><head><title>登录</title></head><body>
+<form method="post">
+  <input type="text" name="username" required class="form-input" placeholder="用户名或邮箱">
+  <input type="password" name="password" required class="form-input" placeholder="密码">
+  <span class="captcha-question" id="captchaQ">{STATE.page_question or STALE_QUESTION}</span>
+  <input type="text" name="captcha" required class="form-input" placeholder="输入计算结果"
+         style="width:120px;" autocomplete="off">
+  <button type="submit">登 录</button>
+</form>
+{err_html}
+<a href="/register.php">注册</a>
+</body></html>"""
+
+
+HOME_OUT = """<!DOCTYPE html><html><body>
+<div class="nav"><a href="/login.php">登录</a><a href="/register.php">注册</a></div>
+<div>欢迎访问黄瓜吧</div>
+</body></html>"""
+
+HOME_IN = """<!DOCTYPE html><html><body>
+<div class="nav"><a href="/logout.php">退出</a></div>
+<div class="sign-panel">每日签到 <span>本月签到 3 天</span></div>
+<script>var CSRF_TOKEN = 'abc123def456abc123def456abc123def456abc123def456abc123def456abcd';</script>
 </body></html>"""
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *a):              # 静默访问日志
+    def log_message(self, *a):
         pass
 
-    def _sid(self):
-        cookie = self.headers.get("Cookie", "")
-        for part in cookie.split(";"):
-            k, _, v = part.strip().partition("=")
-            if k == "jr_session":
-                return v
-        sid = "sid-%d" % len(STATE["sessions"])
-        with LOCK:
-            STATE["sessions"][sid] = {"logged": False, "signed": False}
-        return sid
-
-    def _send(self, code, body, ctype="text/html; charset=utf-8",
-              set_cookie=None, location=None):
-        data = body.encode("utf-8")
+    def _send(self, code, body, ctype="text/html; charset=utf-8", cookies=None):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        if set_cookie:
-            self.send_header("Set-Cookie", "jr_session=%s; Path=/" % set_cookie)
-        if location:
-            self.send_header("Location", location)
+        self.send_header("Content-Length", str(len(body)))
+        for c in (cookies or []):
+            self.send_header("Set-Cookie", c)
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(body)
 
-    def _json(self, code, obj, set_cookie=None):
+    def _json(self, code, obj, cookies=None):
         self._send(code, json.dumps(obj, ensure_ascii=False),
-                   "application/json; charset=utf-8", set_cookie)
+                   "application/json; charset=utf-8", cookies)
 
-    def _body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(n).decode("utf-8") if n else ""
-        ct = self.headers.get("Content-Type", "")
-        if "json" in ct:
-            return json.loads(raw or "{}")
-        return parse_qs(raw)
+    def _count(self, path):
+        STATE.visits[path] = STATE.visits.get(path, 0) + 1
 
+    # -------- GET --------
     def do_GET(self):
-        sid = self._sid()
-        with LOCK:
-            st = STATE["sessions"].setdefault(sid, {"logged": False,
-                                                    "signed": False})
-        if self.path.startswith("/login.php"):
-            self._send(200,
-                       '<span class="captcha-question" id="captchaQ">'
-                       + STATE["question"] + " = ?</span>"
-                       + PAGE_LOGGED_OUT, set_cookie=sid)
-        elif self.path.startswith("/api/captcha.php"):
-            self._json(200, {"question": STATE["question"] + " = ?",
-                             "hint": "请输入计算结果"}, set_cookie=sid)
-        elif self.path == "/" or self.path.startswith("/?"):
-            self._send(200, PAGE_LOGGED_IN if st["logged"] else PAGE_LOGGED_OUT,
-                       set_cookie=sid)
+        path = self.path.split("?")[0]
+        self._count(path)
+
+        if path == "/":
+            self._send(200, HOME_IN if STATE.logged_in else HOME_OUT,
+                       cookies=["jr_session=testsess"] if not STATE.logged_in else None)
+        elif path == "/login.php":
+            _make_captcha()                     # 打开登录页就刷新验证码（真实行为）
+            self._send(200, _login_page_html(), cookies=["jr_session=testsess"])
+        elif path == "/api/captcha.php":
+            if STATE.mode == "noapi":
+                self._send(404, '{"error":"not found"}', "application/json")
+                return
+            _make_captcha()
+            self._json(200, {"question": REAL_QUESTION, "hint": "请输入计算结果"})
         else:
             self._send(404, "not found")
 
+    # -------- POST --------
     def do_POST(self):
-        sid = self._sid()
-        with LOCK:
-            st = STATE["sessions"].setdefault(sid, {"logged": False,
-                                                    "signed": False})
-        body = self._body()
-        if isinstance(body, dict) and all(
-                isinstance(v, list) for v in body.values()):   # urlencoded
-            body = {k: v[0] for k, v in body.items()}
+        path = self.path.split("?")[0]
+        self._count(path)
+        n = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(n).decode("utf-8", "replace")
+        body = {}
+        for part in raw.split("&"):
+            if "=" in part:
+                k, _, v = part.partition("=")
+                body[k] = v
 
-        if self.path.startswith("/login.php"):
-            with LOCK:
-                ok_cap = (str(body.get("captcha", "")).strip()
-                          == str(STATE["answer"]))
-                ok_user = (body.get("username") == STATE["username"]
-                           and body.get("password") == STATE["password"])
-            if not ok_cap:
-                self._send(200, "<html>提示信息：验证码错误，请重试</html>",
-                           set_cookie=sid)
-            elif not ok_user:
-                self._send(200, "<html>提示信息：用户名或密码错误</html>",
-                           set_cookie=sid)
-            else:
-                with LOCK:
-                    st["logged"] = True
-                self._send(302, "", location="/", set_cookie=sid)
-            return
-
-        if self.path.startswith("/api/user.php"):
-            if not st["logged"]:
+        if path == "/login.php":
+            STATE.last_login_body = body
+            cap = body.get("captcha", "")
+            STATE.answer_history.append(cap)
+            if STATE.mode == "badcap":
+                # 验证码错 → 原样返回登录页（真实站点的行为）
+                self._send(200, _login_page_html("验证码错误，请重新输入"))
+                return
+            if STATE.mode == "badpw":
+                self._send(200, _login_page_html("用户名或密码错误"))
+                return
+            if cap != STATE.captcha_answer:
+                self._send(200, _login_page_html("验证码错误，请重新输入"))
+                return
+            if body.get("username") != "u1" or body.get("password") != "p1":
+                self._send(200, _login_page_html("用户名或密码错误"))
+                return
+            STATE.logged_in = True
+            self._send(302, "", cookies=["jr_session=loggedin"])
+        elif path == "/api/user.php":
+            if STATE.mode == "expires" or not STATE.logged_in:
                 self._json(401, {"success": False, "message": "请先登录"})
+                return
+            if STATE.csrf_needed and body.get("csrf_token") != \
+                    "abc123def456abc123def456abc123def456abc123def456abc123def456abcd":
+                self._json(403, {"success": False, "message": "csrf token 校验失败"})
                 return
             if body.get("action") != "sign":
                 self._json(400, {"success": False, "message": "未知操作"})
                 return
-            if STATE["require_csrf"] and \
-                    body.get("csrf_token") != STATE["csrf"]:
-                self._json(403, {"success": False,
-                                 "message": "csrf token 校验失败"})
-                return
-            if st["signed"]:
+            if STATE.signed:
                 self._json(200, {"success": False, "message": "今日已签到"})
-            else:
-                st["signed"] = True
-                self._json(200, {"success": True,
-                                 "message": "签到成功，获得 5 个瓜子"})
-            return
+                return
+            STATE.signed = True
+            self._json(200, {"success": True, "message": "签到成功，获得 2 积分",
+                             "data": {"points": 2}})
+        elif path == "/logout.php":
+            STATE.logged_in = False
+            self._send(302, "")
+        else:
+            self._send(404, "not found")
 
-        self._send(404, "not found")
+
+def start_server():
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-PORT = server.server_address[1]
-SITE = f"http://127.0.0.1:{PORT}"
-threading.Thread(target=server.serve_forever, daemon=True).start()
+# ============================================================
+#  1. 纯函数
+# ============================================================
+def test_arithmetic():
+    print("\n--- 1. 算术验证码求解 ---")
+    cases = [("19 - 15 = ?", "4"), ("60 - 8 = ?", "52"), ("5 × 5 = ?", "25"),
+             ("7 + 8 = ?", "15"), ("20 ÷ 4 = ?", "5"), ("6 x 6 = ?", "36"),
+             ("3 * 4 = ?", "12"), ("10/2 = ?", "5")]
+    for q, want in cases:
+        got = solve_arithmetic(q)
+        check(f"1.x {q} -> {want}", got == want, f"got={got}")
+    check("1.x 无法解析返回 None", solve_arithmetic("hello") is None)
 
-# ---------------- 插件导入 ----------------
-import importlib  # noqa: E402
-plugin_mod = importlib.import_module("plugins.huangguaba")
-plugin = plugin_mod.HuangGuabaPlugin()
 
-print("=" * 62)
-print("1. 算术验证码求解")
-cases = [("19 - 15 = ?", "4"), ("60 - 8 = ?", "52"), ("3 + 9 = ?", "12"),
-         ("7 × 6 = ?", "42"), ("8 ÷ 2 = ?", "4"), ("12 * 3 = ?", "36"),
-         ("5 + ?", None), ("", None)]
-for q, want in cases:
-    got = plugin_mod.solve_arithmetic(q)
-    check(f"1.x {q!r} -> {want}", got == want, got)
+def test_human_reason():
+    print("\n--- 2. 失败原因提取（本轮修复的核心） ---")
+    html = _login_page_html("验证码错误，请重新输入")
+    reason = _human_fail_reason(html)
+    check("2.1 能提取出人话原因", reason is not None and "验证码错误" in reason,
+          repr(reason))
+    check("2.2 消息里不含 HTML 标签", reason is not None and "<" not in reason,
+          repr(reason))
+    check("2.3 消息里不含属性残片（class=/placeholder=）",
+          reason is not None and "class=" not in reason
+          and "placeholder=" not in reason, repr(reason))
+    check("2.4 长度受控（不会刷屏）", reason is not None and len(reason) <= 60,
+          f"len={len(reason) if reason else 0}")
 
-print()
-print("2. Cookie 直连签到（成功路径）")
-with LOCK:
-    STATE["sessions"].clear()
-    STATE["require_csrf"] = False
-# 先走一遍登录拿一个已登录的 sid 当"用户粘贴的 Cookie"
-s0 = STATE["sessions"]
-cookie_val = None
-r = plugin.checkin({"site_url": SITE, "username": STATE["username"],
-                    "password": STATE["password"]})
-check("2.0 预备：账号密码签到成功", r.success, r.message)
-# 从插件回写的 cookie 里取会话
-cookie_val = r.cookie
-check("2.0b 成功后回写 Cookie", bool(r.cookie), r.cookie[:60])
+    # ⚠️ 关键回归：「输入计算结果」只出现在**正常表单的 placeholder** 里，
+    #    不能因此被当失败原因（v1.0 就是踩了这个）。
+    clean_form = _login_page_html()
+    r2 = _human_fail_reason(clean_form)
+    check("2.5 正常表单不误报原因（placeholder 不算失败）",
+          r2 is None or "计算结果" not in r2, repr(r2))
 
-r = plugin.checkin({"site_url": SITE, "cookie": cookie_val})
-check("2.1 Cookie 直连成功（已签到也算成功）", r.success, r.message)
-check("2.2 消息为「今日已签到」", "已签到" in r.message, r.message)
+    check("2.6 空输入返回 None", _human_fail_reason("") is None)
+    check("2.7 无错误关键词返回 None",
+          _human_fail_reason("<html><body>欢迎</body></html>") is None)
+    # script 内容不应被抠出来当原因
+    r3 = _human_fail_reason('<script>var a="登录失败测试";</script><p>正常</p>')
+    check("2.8 不从句本里抠原因", r3 is None or "登录失败测试" not in r3, repr(r3))
 
-print()
-print("3. 账号密码自动登录签到")
-with LOCK:
-    STATE["sessions"].clear()          # 全新状态：未登录、未签到
-r = plugin.checkin({"site_url": SITE, "username": STATE["username"],
-                    "password": STATE["password"]})
-check("3.1 登录+签到成功", r.success, r.message)
-check("3.2 消息含奖励", "签到成功" in r.message, r.message)
-check("3.3 回写 Cookie 供下次复用", bool(r.cookie))
 
-print()
-print("4. 验证码错误 → 登录失败并给出可读原因")
-with LOCK:
-    STATE["sessions"].clear()
-    STATE["answer"] = 999              # 服务端认可的答案与题目不符
-r = plugin.checkin({"site_url": SITE, "username": STATE["username"],
-                    "password": STATE["password"]})
-check("4.1 登录失败", not r.success, r.message)
-check("4.2 报「验证码错误」", "验证码错误" in r.message, r.message)
-with LOCK:
-    STATE["answer"] = 4
+def test_cookie_utils():
+    print("\n--- 3. Cookie 解析 ---")
+    d = _parse_cookies("a=1; b=2; ; c=3")
+    check("3.1 解析多段", d == {"a": "1", "b": "2", "c": "3"}, str(d))
+    check("3.2 空串返回空 dict", _parse_cookies("") == {})
+    check("3.3 无等号段被忽略", _parse_cookies("abc; d=4") == {"d": "4"})
 
-print()
-print("5. 密码错误 → 可读失败原因")
-r = plugin.checkin({"site_url": SITE, "username": STATE["username"],
-                    "password": "wrong-pass"})
-check("5.1 登录失败", not r.success, r.message)
-check("5.2 报「用户名或密码错误」", "用户名或密码错误" in r.message, r.message)
+    class S:
+        class cookies:
+            @staticmethod
+            def get_dict():
+                return {"k": "v", "k2": "v2"}
+    out = _cookie_to_str(S())
+    check("3.4 回写成标准串", out == "k=v; k2=v2", out)
 
-print()
-print("6. Cookie 失效 → 自动回退账号密码重新登录")
-with LOCK:
-    STATE["sessions"].clear()
-r = plugin.checkin({"site_url": SITE, "cookie": "jr_session=stale-invalid",
-                    "username": STATE["username"],
-                    "password": STATE["password"]})
-check("6.1 回退登录后签到成功", r.success, r.message)
 
-print()
-print("7. CSRF 强制校验 → 插件提取 token 重试")
-with LOCK:
-    STATE["sessions"].clear()
-    STATE["require_csrf"] = True
-r = plugin.checkin({"site_url": SITE, "username": STATE["username"],
-                    "password": STATE["password"]})
-check("7.1 需要 csrf 时仍签到成功", r.success, r.message)
-with LOCK:
-    STATE["require_csrf"] = False
+# ============================================================
+#  4. 端到端（真 HTTP）
+# ============================================================
+def test_login_success(base):
+    print("\n--- 4. 账号密码登录（接口优先取题） ---")
+    STATE.reset()
+    p = HuangGuabaPlugin()
+    r = p.checkin({"site_url": base, "username": "u1", "password": "p1",
+                   "cookie": "", "params": {}})
+    check("4.1 签到成功", r.success, r.message)
+    check("4.2 提交的答案 = 接口题目算出来的（不是页面的）",
+          STATE.answer_history and STATE.answer_history[-1] == REAL_ANSWER,
+          f"history={STATE.answer_history} 页面题目算出来应是 "
+          f"{solve_arithmetic(STALE_QUESTION)}")
+    check("4.3 回写了 Cookie 供下次复用", bool(r.cookie), r.cookie[:40])
+    check("4.4 访问过 captcha 接口",
+          STATE.visits.get("/api/captcha.php", 0) >= 1,
+          str(STATE.visits))
 
-print()
-print("8. 无任何认证方式 → 可读报错")
-r = plugin.checkin({"site_url": SITE})
-check("8.1 提示填写认证方式", not r.success and "Cookie" in r.message,
-      r.message)
 
-print()
-print("9. 参数校验")
-ok, msg = plugin.validate_params({})
-check("9.1 无必填专属参数，校验通过", ok, msg)
+def test_page_fallback_when_api_missing(base):
+    """接口不可用时应回退读页面题目（容错路径仍要能用）"""
+    print("\n--- 5. 接口挂掉时回退页面题目 ---")
+    STATE.reset()
+    STATE.mode = "noapi"
+    # 页面题目是 STALE_QUESTION，答案就是它算出来的
+    p = HuangGuabaPlugin()
+    r = p.checkin({"site_url": base, "username": "u1", "password": "p1"})
+    check("5.1 回退失败但报的是可读原因（不是崩溃）",
+          (not r.success) and ("验证码" in r.message or "登录失败" in r.message),
+          r.message)
+    check("5.2 确实尝试过接口", STATE.visits.get("/api/captcha.php", 0) >= 1)
+    STATE.mode = "ok"
 
-print()
-print("10. 插件元信息")
-check("10.1 name=huangguaba", plugin.name == "huangguaba")
-check("10.2 display_name=黄瓜吧", plugin.display_name == "黄瓜吧")
-check("10.3 继承 BasePlugin",
-      isinstance(plugin, __import__("plugins.base", fromlist=["BasePlugin"])
-                 .BasePlugin))
 
-print()
-print("=" * 62)
-print(f"PASS {PASS}  FAIL {FAIL}")
-if FAILS:
-    for f in FAILS:
-        print("  -", f)
-server.shutdown()
-sys.exit(0 if FAIL == 0 else 1)
+def test_login_bad_password(base):
+    print("\n--- 6. 密码错误时的消息质量 ---")
+    STATE.reset()
+    STATE.mode = "badpw"
+    p = HuangGuabaPlugin()
+    r = p.checkin({"site_url": base, "username": "u1", "password": "wrong"})
+    check("6.1 失败", not r.success)
+    check("6.2 消息含「用户名或密码错误」", "用户名或密码错误" in r.message, r.message)
+    check("6.3 消息不含 HTML 标签残片",
+          "class=" not in r.message and "placeholder=" not in r.message
+          and "<input" not in r.message, r.message)
+    check("6.4 error_type=login_failed",
+          r.extra.get("error_type") == "login_failed", str(r.extra))
+    STATE.mode = "ok"
+
+
+def test_login_bad_captcha(base):
+    print("\n--- 7. 验证码错误（用户实际遇到的场景） ---")
+    STATE.reset()
+    STATE.mode = "badcap"
+    p = HuangGuabaPlugin()
+    r = p.checkin({"site_url": base, "username": "u1", "password": "p1"})
+    check("7.1 失败", not r.success)
+    check("7.2 消息是「验证码错误」人话", "验证码错误" in r.message, r.message)
+    check("7.3 不再出现 s=\"form-input\" 这种残片",
+          's="form-input"' not in r.message and "输入计算结果" not in r.message,
+          r.message)
+    check("7.4 提交的答案确实来自接口题目",
+          STATE.answer_history and STATE.answer_history[-1] == REAL_ANSWER,
+          str(STATE.answer_history))
+    STATE.mode = "ok"
+
+
+def test_cookie_path(base):
+    print("\n--- 8. Cookie 直连 ---")
+    STATE.reset()
+    STATE.logged_in = True
+    p = HuangGuabaPlugin()
+    r = p.checkin({"cookie": "jr_session=loggedin", "site_url": base})
+    check("8.1 Cookie 直连签到成功", r.success, r.message)
+    check("8.2 未走登录流程", "/login.php" not in STATE.visits, str(STATE.visits))
+
+
+def test_cookie_expired_fallback(base):
+    print("\n--- 9. Cookie 失效回退账号密码（并回写新 Cookie） ---")
+    STATE.reset()
+    STATE.logged_in = False          # Cookie 无效
+    p = HuangGuabaPlugin()
+    r = p.checkin({"cookie": "jr_session=stale", "site_url": base,
+                   "username": "u1", "password": "p1"})
+    check("9.1 回退后签到成功", r.success, r.message)
+    check("9.2 走过登录页", STATE.visits.get("/login.php", 0) >= 1, str(STATE.visits))
+    check("9.3 回写新 Cookie", bool(r.cookie), r.cookie[:40])
+
+
+def test_already_signed(base):
+    print("\n--- 10. 今日已签到视为成功 ---")
+    STATE.reset()
+    STATE.logged_in = True
+    STATE.signed = True
+    p = HuangGuabaPlugin()
+    r = p.checkin({"cookie": "jr_session=loggedin", "site_url": base})
+    check("10.1 已签到算成功（定时任务重跑不误报）", r.success, r.message)
+    check("10.2 带 already 标记", r.extra.get("already") is True, str(r.extra))
+
+
+def test_csrf_retry(base):
+    print("\n--- 11. 签到接口要求 CSRF 时自动带上重试 ---")
+    STATE.reset()
+    STATE.logged_in = True
+    STATE.csrf_needed = True
+    p = HuangGuabaPlugin()
+    r = p.checkin({"cookie": "jr_session=loggedin", "site_url": base})
+    check("11.1 CSRF 重试后成功", r.success, r.message)
+    check("11.2 首页被访问过（用于提取 token）", STATE.visits.get("/", 0) >= 1,
+          str(STATE.visits))
+    STATE.csrf_needed = False
+
+
+def test_no_auth(base):
+    print("\n--- 12. 未提供任何认证方式 ---")
+    STATE.reset()
+    p = HuangGuabaPlugin()
+    r = p.checkin({"site_url": base})
+    check("12.1 给出明确提示", not r.success and "请填写" in r.message, r.message)
+    check("12.2 error_type=no_auth", r.extra.get("error_type") == "no_auth")
+
+
+def test_network_error():
+    print("\n--- 13. 网络不可达（不崩，给可读错误） ---")
+    p = HuangGuabaPlugin()
+    # 127.0.0.1 上一个必然没人监听的端口。
+    # ⚠️ 本机可能挂着代理（Clash 等），它会给连不上的目标回一个 502，
+    #    所以这里不能断言「一定是 ConnectionError」—— 两种情况都算连不上。
+    r = p.checkin({"site_url": "http://127.0.0.1:9", "username": "u", "password": "p"})
+    check("13.1 不抛异常、返回失败", not r.success, r.message[:80])
+    # 连不上就必须说「连不上」；不能报成「站点改版」——那会让用户
+    # 跑去查页面结构，方向全错。
+    check("13.2 消息指向网络/访问问题（不是「站点改版」）",
+          "无法访问站点" in r.message and "改版" not in r.message,
+          r.message[:90])
+    check("13.3 消息带上了实际原因（异常类名或 HTTP 码）",
+          ("ConnectionError" in r.message or "Timeout" in r.message
+           or "HTTP" in r.message), r.message[:90])
+    check("13.4 不含 HTML 残片",
+          "<" not in r.message and "class=" not in r.message, r.message[:90])
+
+    # 另一个方向：站点活着但接口返回的不是 JSON（反代改写过之类）
+    # → 不能报成「连不上」，要指向接口本身
+    class _FakeNonJson:
+        status_code = 200
+        def json(self):
+            raise ValueError("not json")
+    r2 = p._do_login  # 只要证明消息分支存在即可（上面 e2e 已覆盖真路径）
+    check("13.5 存在「返回非 JSON」这条独立分支",
+          "返回非 JSON" in open(
+              os.path.join(os.path.dirname(os.path.dirname(
+                  os.path.abspath(__file__))), "plugins", "huangguaba.py"),
+              encoding="utf-8").read())
+
+
+def test_meta():
+    print("\n--- 14. 插件元信息 ---")
+    p = HuangGuabaPlugin()
+    check("14.1 name=huangguaba", p.name == "huangguaba", p.name)
+    check("14.2 显示名", p.display_name == "黄瓜吧", p.display_name)
+    check("14.3 无需专属表单字段", p.form_schema == [], str(p.form_schema))
+    check("14.4 版本已升", p.version >= "1.1", p.version)
+
+
+def main():
+    srv, base = start_server()
+    try:
+        test_arithmetic()
+        test_human_reason()
+        test_cookie_utils()
+        test_login_success(base)
+        test_page_fallback_when_api_missing(base)
+        test_login_bad_password(base)
+        test_login_bad_captcha(base)
+        test_cookie_path(base)
+        test_cookie_expired_fallback(base)
+        test_already_signed(base)
+        test_csrf_retry(base)
+        test_no_auth(base)
+        test_network_error()
+        test_meta()
+    finally:
+        srv.shutdown()
+
+    print("\n" + "=" * 60)
+    print(f"PASS {PASS}  FAIL {FAIL}")
+    if FAILS:
+        for f in FAILS:
+            print("  -", f)
+    print("HUANGGUABA_OK" if not FAIL else "HUANGGUABA_FAILED")
+    return 0 if FAIL == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

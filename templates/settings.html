@@ -14,6 +14,8 @@
         <span class="settings-nav-icon">&#9993;</span>通知推送</div>
       <div class="settings-nav-item" data-pane="captcha">
         <span class="settings-nav-icon">&#9635;</span>验证码识别</div>
+      <div class="settings-nav-item" data-pane="security">
+        <span class="settings-nav-icon">&#128274;</span>访问密码</div>
       <div class="settings-nav-item" data-pane="transfer">
         <span class="settings-nav-icon">&#8645;</span>任务导出 / 导入</div>
       <div class="settings-nav-item" data-pane="backup">
@@ -164,6 +166,52 @@
     </div>
     <div id="extrasProgText" style="font-size: 12px; color: var(--text-muted);
          margin-top: 4px;">准备中…</div>
+  </div>
+
+  </div>
+  <!-- ============ 分页 3.5：访问密码 ============ -->
+  <div class="settings-pane" data-pane="security">
+  <div class="section-title">访问密码</div>
+  <div class="help-text" style="margin-bottom: 14px;">
+    控制<strong>谁能打开这个管理界面</strong>。程序本身没有任何其他鉴权，
+    一旦通过反代暴露到外网，谁都可以看到你的任务、账号配置和推送设置 ——
+    所以对外访问时<strong>务必保持开启</strong>。
+  </div>
+
+  <div id="authStatus" style="padding: 12px; border-radius: var(--radius);
+       background: var(--bg-secondary, #f8fafc); font-size: 13px;
+       margin-bottom: 16px; line-height: 1.9;">读取中…</div>
+
+  <div class="form-group">
+    <label>当前密码 <span class="required">*</span></label>
+    <input type="password" id="authOld" placeholder="默认密码为 123456"
+           autocomplete="current-password">
+  </div>
+  <div class="form-group">
+    <label>新密码 <span class="required">*</span></label>
+    <input type="password" id="authNew" placeholder="至少 4 位"
+           autocomplete="new-password">
+  </div>
+  <div class="form-group">
+    <label>确认新密码 <span class="required">*</span></label>
+    <input type="password" id="authNew2" placeholder="再输入一次"
+           autocomplete="new-password">
+  </div>
+
+  <div class="modal-actions" style="justify-content: flex-start; gap: 8px; flex-wrap: wrap;">
+    <button class="btn btn-primary" id="saveAuthPwBtn" onclick="saveAuthPassword()">
+      修改密码</button>
+    <span id="authMsg" style="font-size: 12px; color: var(--text-muted);"></span>
+  </div>
+
+  <div class="form-group" style="margin-top: 22px; padding-top: 16px;
+       border-top: 1px solid var(--border-light);">
+    <label>密码保护开关</label>
+    <div id="authToggleBox" style="font-size: 13px; line-height: 2;">读取中…</div>
+    <div class="help-text">
+      关闭后<strong>任何人访问地址都无需密码</strong>，适合确认只在纯内网使用的情况。
+      关闭时需要验证当前密码。
+    </div>
   </div>
 
   </div>
@@ -1276,6 +1324,116 @@ function renderEnv(d) {
   return `<div>${rows.join('')}</div>`;
 }
 
+// ==================== 访问密码 ====================
+// 密码是 PBKDF2 哈希存的，界面读不到明文；这里只展示「开没开 / 是不是默认值」。
+let authState = null;
+
+async function loadAuth() {
+  const box = document.getElementById('authStatus');
+  const tbox = document.getElementById('authToggleBox');
+  try {
+    const r = await fetch('/api/auth/status');
+    authState = await r.json();
+  } catch(e) {
+    box.textContent = '读取失败：' + e.message;
+    return;
+  }
+  const on = !!authState.enabled;
+  const def = !!authState.is_default_password;
+
+  let badge, color, bg, tip;
+  if (!on) {
+    badge = '未开启（无需密码）'; color = '#92400e'; bg = '#fffbeb';
+    tip = '当前任何人访问都能直接进入。若已通过反代对外，建议立即开启。';
+  } else if (def) {
+    badge = '已开启 · 使用默认密码'; color = '#b91c1c'; bg = '#fef2f2';
+    tip = '默认密码 123456 很容易被猜到，请尽快改成只有你知道的密码。';
+  } else {
+    badge = '已开启 · 已自定义密码'; color = '#15803d'; bg = '#f0fdf4';
+    tip = '管理界面需要密码才能访问。';
+  }
+  box.innerHTML = `
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span style="padding:2px 8px; border-radius:10px; font-size:12px;
+                   color:${color}; background:${bg};">${badge}</span>
+    </div>
+    <div style="margin-top:6px; color:var(--text-muted);">${esc(tip)}</div>`;
+
+  tbox.innerHTML = `
+    <label style="font-weight:400; display:flex; align-items:center; gap:6px;">
+      <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleAuth(this.checked)">
+      开启密码保护</label>
+    <div style="color:var(--text-muted); font-size:12px; margin-top:4px;">
+      关闭时需在弹窗里输入当前密码确认。</div>`;
+}
+
+function authMsg(text, kind) {
+  const el = document.getElementById('authMsg');
+  el.textContent = text || '';
+  el.style.color = kind === 'error' ? '#b91c1c'
+                 : kind === 'ok' ? '#15803d' : 'var(--text-muted)';
+}
+
+async function saveAuthPassword() {
+  const oldPw = document.getElementById('authOld').value;
+  const nw = document.getElementById('authNew').value;
+  const nw2 = document.getElementById('authNew2').value;
+  if (!oldPw) { authMsg('请输入当前密码', 'error'); return; }
+  if (nw.length < 4) { authMsg('新密码至少 4 位', 'error'); return; }
+  if (nw !== nw2) { authMsg('两次输入的新密码不一致', 'error'); return; }
+
+  const btn = document.getElementById('saveAuthPwBtn');
+  btn.disabled = true;
+  authMsg('提交中…');
+  try {
+    const r = await fetch('/api/auth/password', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({old_password: oldPw, new_password: nw,
+                            confirm_password: nw2}),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.success) {
+      authMsg(d.message || '密码已修改', 'ok');
+      showToast('success', '密码已修改');
+      document.getElementById('authOld').value = '';
+      document.getElementById('authNew').value = '';
+      document.getElementById('authNew2').value = '';
+      loadAuth();
+    } else {
+      authMsg(d.message || '修改失败', 'error');
+      showToast('error', d.message || '修改失败');
+    }
+  } catch(e) {
+    authMsg('请求失败：' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function toggleAuth(enabled) {
+  const pw = prompt(enabled
+    ? '开启密码保护。\n请输入当前访问密码确认：'
+    : '⚠️ 关闭后任何人访问都无需密码。\n请输入当前访问密码确认：');
+  if (pw === null) { loadAuth(); return; }   // 用户取消 → 还原勾选状态
+  try {
+    const r = await fetch('/api/auth/toggle', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({enabled, password: pw}),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.success) {
+      showToast('success', d.message || '已更新');
+      loadAuth();
+    } else {
+      showToast('error', d.message || '操作失败');
+      loadAuth();
+    }
+  } catch(e) {
+    showToast('error', '请求失败：' + e.message);
+    loadAuth();
+  }
+}
+
 // ==================== 设置页分页切换 ====================
 // 只切 display，不重建 DOM —— 各分页里已经绑定的事件/已渲染的内容都保留。
 // 支持 URL hash（如 /settings#notify 直接打开通知推送页），
@@ -1331,6 +1489,7 @@ function onPaneShown(name) {
   if (_paneLoaded[name]) return;
   _paneLoaded[name] = true;
   if (name === 'env') loadEnv();
+  if (name === 'security') loadAuth();
 }
 
 loadStatus();

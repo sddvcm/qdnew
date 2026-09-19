@@ -132,6 +132,16 @@ def init_db():
 
         -- 任务与该模板自带变量的默认值绑定（同一模板可被多个任务用不同账号跑）
         CREATE INDEX IF NOT EXISTS idx_har_tpl_name ON har_templates(name);
+
+        -- ===== 访问鉴权的会话 =====
+        -- token 是一次性随机串（secrets.token_urlsafe），落库只为能校验与撤销。
+        -- ⚠️ **不存明文密码** —— 密码只有 PBKDF2 哈希与盐，存 system_config 里。
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            token TEXT PRIMARY KEY,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_auth_sessions_exp ON auth_sessions(expires_at);
     """)
 
     _migrate(conn)
@@ -159,3 +169,17 @@ def _migrate(conn):
                 updated_at TEXT DEFAULT (datetime('now','localtime'))
             )
         """)
+    # 鉴权会话表（v1.8.0 新增）—— 老库升级时要补，
+    # 否则鉴权一开就直接 500（表不存在）。
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='auth_sessions'")
+    if not cursor.fetchone():
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token TEXT PRIMARY KEY,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_auth_sessions_exp "
+            "ON auth_sessions(expires_at)")

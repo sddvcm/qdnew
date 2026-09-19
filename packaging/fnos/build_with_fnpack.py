@@ -133,18 +133,19 @@ def stage_project(version: str) -> str:
     with open(os.path.join(ui_dst, "config"), "w", encoding="utf-8") as f:
         json.dump(ui_cfg, f, ensure_ascii=False, indent=4)
 
-    # 3) cmd/ config/ （wizard/ 保持空）
-    for sub in ("cmd", "config"):
+    # 3) cmd/ config/ wizard/
+    for sub in ("cmd", "config", "wizard"):
         s = os.path.join(HERE, sub)
         d = os.path.join(SRC, sub)
+        # ⚠️ wizard/ 早期被**刻意清空**（那时我们没有向导项，自造的
+        #    `{"type":"switch"}` 会被 fnpack 报
+        #    "is not valid due to JSON format or content validation failure"）。
+        #    现在向导是有意为之，必须原样拷贝过去 —— 继续清空的话
+        #    「安装时填端口/密码」在包里根本不存在，装机时看不到任何设置项。
         if os.path.isdir(s):
             copy_tree_fresh(s, d)
-    os.makedirs(os.path.join(SRC, "wizard"), exist_ok=True)
-    for f in os.listdir(os.path.join(SRC, "wizard")):
-        try:
-            os.remove(os.path.join(SRC, "wizard", f))
-        except OSError:
-            pass
+        else:
+            os.makedirs(d, exist_ok=True)
 
     # 4) 图标
     for f in ("ICON.PNG", "ICON_256.PNG"):

@@ -18,10 +18,15 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+from test_auth_helper import login_client
 os.chdir(ROOT)
 TMP = tempfile.mkdtemp(prefix="tmpl_reload_")
 os.environ["CHECKIN_DATA_DIR"] = TMP
 os.environ["CHECKIN_SECRET_KEY"] = "tmpl-test-key"
+_HERE_FOR_HELPER = os.path.dirname(os.path.abspath(__file__))
+if _HERE_FOR_HELPER not in sys.path:
+    sys.path.insert(0, _HERE_FOR_HELPER)
 sys.path.insert(0, ROOT)
 
 PASS = FAIL = 0
@@ -55,7 +60,7 @@ check("1.1 TEMPLATES_AUTO_RELOAD 已开启",
 check("1.2 jinja_env.auto_reload 已开启",
       app.jinja_env.auto_reload is True)
 
-c = app.test_client()
+c = login_client(app)
 r = c.get("/settings")
 html = r.get_data(as_text=True)
 check("1.3 首次渲染 200", r.status_code == 200)
@@ -67,7 +72,7 @@ MARK = "<!--TMPL_RELOAD_MARKER-->"
 
 
 def _render():
-    c2 = app.test_client()
+    c2 = login_client(app)
     return c2.get("/settings").get_data(as_text=True)
 
 

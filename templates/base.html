@@ -15,9 +15,18 @@
     <a href="/task/add" class="{% if request.path == '/task/add' %}active{% endif %}">添加任务</a>
     <a href="/har" class="{% if request.path.startswith('/har') %}active{% endif %}">HAR 模板</a>
     <a href="/plugin/import" class="{% if request.path == '/plugin/import' %}active{% endif %}">导入插件</a>
-    <a href="/settings" class="{% if request.path == '/settings' %}active{% endif %}">系统设置</a>
+    <a href="/settings" class="{% if request.path == '/settings' %}active{% endif %}">
+      系统设置{% if auth_default_pw %}<span class="nav-dot" title="仍在使用默认密码，建议尽快修改"></span>{% endif %}</a>
+    <a href="#" id="logoutBtn" title="退出登录">退出</a>
   </nav>
 </header>
+{% if auth_default_pw %}
+<div class="global-hint-warn">
+  当前仍在使用<strong>默认访问密码 123456</strong>，建议立即前往
+  <a href="/settings#security">系统设置 → 访问密码</a> 修改。
+  <span class="global-hint-close" onclick="this.parentNode.style.display='none'">✕</span>
+</div>
+{% endif %}
 <div class="container">
 {% block content %}{% endblock %}
 </div>

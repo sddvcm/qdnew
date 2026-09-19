@@ -13,10 +13,15 @@ import tempfile
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+from test_auth_helper import login_client
 os.chdir(ROOT)
 TMP = tempfile.mkdtemp(prefix="transfer_e2e_")
 os.environ["CHECKIN_DATA_DIR"] = TMP
 os.environ["CHECKIN_SECRET_KEY"] = "e2e-key-xyz"
+_HERE_FOR_HELPER = os.path.dirname(os.path.abspath(__file__))
+if _HERE_FOR_HELPER not in sys.path:
+    sys.path.insert(0, _HERE_FOR_HELPER)
 sys.path.insert(0, ROOT)
 
 PASS = FAIL = 0
@@ -57,7 +62,7 @@ from app.crypto import encrypt       # noqa: E402
 fresh_db()
 app = create_app()
 app.config["TESTING"] = True
-c = app.test_client()
+c = login_client(app)
 
 print("=" * 60)
 print("1. 造数据")
@@ -198,7 +203,7 @@ print("7. 换机导入：清库 → 导入")
 fresh_db()
 app2 = create_app()
 app2.config["TESTING"] = True
-c2 = app2.test_client()
+c2 = login_client(app2)
 db = get_db()
 check("7.1 清库后无任务",
       db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 0)
@@ -284,7 +289,7 @@ import re as _re  # noqa: E402
 _nav = _re.findall(r'settings-nav-item[^>]*data-pane="(\w+)"', html)
 _panes = _re.findall(r'settings-pane[^>]*data-pane="(\w+)"', html)
 check("9.3 左侧导航分页齐全", _nav == [
-    "update", "notify", "captcha", "transfer", "backup", "env"], _nav)
+    "update", "notify", "captcha", "security", "transfer", "backup", "env"], _nav)
 check("9.4 导航与面板一一对应", _nav == _panes, _panes)
 check("9.5 含分页切换函数", "showSettingsPane" in html
       and "initSettingsNav" in html)
@@ -328,7 +333,7 @@ print()
 print("10. 空库导出 / 空包导入")
 fresh_db()
 app3 = create_app(); app3.config["TESTING"] = True
-c3 = app3.test_client()
+c3 = login_client(app3)
 r = c3.post("/api/transfer/export", json={})
 check("10.1 空库也能导出", r.status_code == 200
       and r.get_data()[:7] == b"QDPACK1")

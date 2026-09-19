@@ -10,6 +10,11 @@ import sys
 import tempfile
 
 ROOT = r"C:\Users\Administrator\WorkBuddy\自动签到\checkin-system"
+
+from test_auth_helper import login_client
+_HERE_FOR_HELPER = os.path.dirname(os.path.abspath(__file__))
+if _HERE_FOR_HELPER not in sys.path:
+    sys.path.insert(0, _HERE_FOR_HELPER)
 sys.path.insert(0, ROOT)
 
 # ⚠️ 必须在 import app.* 之前把 DB 目录指到临时目录，否则会写进生产库
@@ -52,7 +57,7 @@ try:
     from app.main import create_app
 
     app = create_app()
-    client = app.test_client()
+    client = login_client(app)
     check("4.1 应用启动成功", True)
 
     # ---- 数据库建表 ----

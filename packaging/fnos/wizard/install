@@ -1,18 +1,33 @@
 [
   {
-    "stepTitle": "签到管理系统",
+    "stepTitle": "签到管理系统 · 基础设置",
     "items": [
       {
         "type": "tips",
-        "helpText": "轻量级插件化自动签到平台，内置完整运行时，安装后即可使用，无需联网下载依赖。"
+        "helpText": "轻量级插件化自动签到平台，内置完整 Python 运行时，安装后即可使用，无需联网下载依赖。"
+      },
+      {
+        "type": "text",
+        "field": "APP_PORT",
+        "label": "访问端口",
+        "initValue": "5800",
+        "helpText": "管理界面端口，需未被其他应用占用。想改端口可以随时编辑应用配置里的 app.env。",
+        "rules": [
+          { "required": true, "message": "请输入端口号" },
+          { "pattern": "^[0-9]+$", "message": "端口号必须为数字" }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "AUTH_PASSWORD",
+        "label": "访问密码（可选）",
+        "initValue": "",
+        "helpText": "打开管理界面所需的密码，留空则使用默认密码 123456。建议直接在这里设成只有你知道的密码 —— 若打算通过反代暴露到外网，这一步很重要。登录后也能在「系统设置 → 访问密码」里随时修改。",
+        "rules": []
       },
       {
         "type": "tips",
-        "helpText": "安装完成后，从桌面图标打开管理界面。"
-      },
-      {
-        "type": "tips",
-        "helpText": "访问地址：http://NAS的IP:5800（端口固定为 5800，请在应用设置中查看运行状态）。"
+        "helpText": "安装完成后，从飞牛桌面图标打开管理界面；也可以直接访问 http://NAS的IP:上面填的端口。"
       }
     ]
   }

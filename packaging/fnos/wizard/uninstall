@@ -4,17 +4,18 @@
     "items": [
       {
         "type": "tips",
-        "helpText": "卸载默认保留你的数据（任务配置、账号、签到记录、备份），重装后自动恢复。"
+        "helpText": "卸载默认保留你的数据（任务配置、账号、签到记录、备份、访问密码），重装后自动恢复。"
       },
       {
-        "type": "switch",
-        "field": "purge_data",
-        "label": "同时删除全部数据",
-        "initValue": false
-      },
-      {
-        "type": "tips",
-        "helpText": "⚠️ 打开上方开关将删除数据库与全部签到记录，且不可恢复。"
+        "type": "radio",
+        "field": "data_action",
+        "label": "数据处理",
+        "initValue": "keep",
+        "options": [
+          { "label": "保留数据（默认，重装后可恢复）", "value": "keep" },
+          { "label": "删除全部数据（不可恢复）", "value": "delete" }
+        ],
+        "helpText": "选择「删除全部数据」会清空数据库与全部签到记录，且不可恢复，请谨慎操作。"
       }
     ]
   }

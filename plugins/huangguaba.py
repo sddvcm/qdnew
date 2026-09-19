@@ -8,8 +8,25 @@
   程序可直接算出答案，无需打码/OCR。
 - 签到：POST /api/user.php，body `action=sign`，未登录返回
   401 {"success":false,"message":"请先登录"}，响应为干净 JSON。
-- CSRF：站内部分接口使用 CSRF_TOKEN（页面 JS 内联），签到接口若要求
-  token，会从首页 HTML 提取后重试一次。
+- CSRF：站内接口统一用 `csrf_token` **表单字段**（页面内联 `var CSRF_TOKEN`
+  给出，随登录态刷新）。签到接口若要求 token，会从已登录页面提取后重试。
+
+⚠️ **登录失败的排查史**（v1.0 的坑，务必别踩回去）：
+
+  1. 原本从 `id="captchaQ"` 读算术题。但**每次刷新验证码，服务端都会把
+     答案重新绑定到 session**，而登录页上那个 `<span id="captchaQ">` 里的
+     题目和服务端存的答案**不是同一次生成的** → 我们算出来的答案对不上。
+     症状：用户日志里出现 `class="form-input" placeholder="输入计算结果"`
+     这段 HTML，说明**服务端把登录页原样返回了**（验证码校验失败时不重定向，
+     直接把表单页当响应体吐回来）。
+     → 现在**一律以 `GET /api/captcha.php` 的 `question` 为准**，不再读页面。
+     → 页面里的 `captchaQ` 只作为最后兜底（且仅在没有接口数据时用）。
+
+  2. 失败原因必须**从响应里挑出真正的人话**。把整段 HTML 当消息输出的话，
+     用户看到的就是 `s="form-input" placeholder="输入计算结果"...` 这种
+     天书（`<input` 被 HTML 转义成 `&lt;input`，截断后从 `s="` 开始）。
+     → 现在优先匹配「登录失败 / 验证码错误 / 密码错误 / 尝试次数」等短语，
+       截断长度也放大到能带足上下文。
 
 两种认证方式（与 fuliba 插件一致）：
 - Cookie 直连：粘贴浏览器 Cookie，失效自动回退账号密码登录
@@ -32,10 +49,74 @@ HEADERS = {
 }
 
 # 已知的登录失败关键词（响应 HTML 里出现即认为登录失败）
+#
+# ⚠️ 顺序即优先级：越靠前越可能是「真正的原因」，取到第一个命中就返回。
+#    原先把「计算结果」放在第二位 —— 但它同时出现在**正常的登录表单**
+#    （placeholder="输入计算结果"）里，导致验证码错误时也会命中它，
+#    消息里就会冒出一段 input 标签。现在删掉了，改用更明确的短语。
 _LOGIN_FAIL_MARKERS = (
-    "验证码错误", "验证码不正确", "计算结果", "用户名或密码错误",
-    "密码错误", "账号不存在", "用户不存在", "已被封禁", "尝试次数",
+    "验证码错误", "验证码不正确", "验证码已失效", "验证码失效",
+    "用户名或密码错误", "密码错误", "账号或密码", "账号不存在",
+    "用户不存在", "已被封禁", "账号被锁定", "尝试次数", "登录失败",
+    "请重新输入", "请稍后再试", "频繁",
 )
+
+# 从失败响应里提取人话时，允许的最大长度（够带上下文，又不会刷屏）
+_FAIL_SNIPPET_MAX = 60
+
+
+def _human_fail_reason(html_text: str):
+    """从登录失败响应里挑出**人能看懂**的一句话。
+
+    为什么单独抽出来：服务端验证码失败时返回的是**整页登录页 HTML**，
+    直接把它当消息会让任务日志显示 `s="form-input" placeholder="输入计算结果"`
+    这种截断后的标签残片（用户实际反馈过，完全没法定位）。
+
+    策略：按关键词优先级找一条带上下文的中文短语并剥掉标签；
+    一条都没命中就返回 None，让调用方去用别的兜底。
+    """
+    if not html_text:
+        return None
+    text = html_text
+    # 去掉 <script>/<style> 块，避免从 JS 里抠出无意义的片段
+    text = re.sub(r"<script[\s\S]*?</script>", " ", text, flags=re.I)
+    text = re.sub(r"<style[\s\S]*?</style>", " ", text, flags=re.I)
+
+    def _clean(frag: str) -> str:
+        """把片段洗成纯文本。
+
+        为什么要这么绕（三条都踩过坑）：
+
+        ⚠️ ① `re.sub(r"<[^>]+>", "", ...)` 洗不掉**残缺标签**。
+              片段从标签中间截断时（如 `form> 验证码错误`），开头的 `form>`
+              没有配对的 `<`，正则匹配不到，就残留下来了。
+        ⚠️ ② 用 `$` 清理行尾时要配 `re.M`。片段里含换行，非 M 模式下 `$`
+              只能匹配整串末尾，挂在第二行的半截标签永远清不掉。
+        ⚠️ ③ 字符类里**不能写 `\\s`**。`<[^>\\s]*$` 会把引号、空格之前的
+              内容也一并对齐，实测匹配不到 `...<a href="/registe` 这种尾巴；
+              正确写法是 `<[^<>]*$`（只排除 `<` 和 `>`）。
+        """
+        frag = re.sub(r"<[^>]+>", "", frag)          # 先吃掉完整标签
+        frag = re.sub(r"^\S{0,20}>", "", frag)       # 再清行首的标签尾巴
+        frag = re.sub(r"<[^<>]*$", "", frag, flags=re.M)   # 再清行尾的半截标签
+        frag = html.unescape(frag)
+        frag = re.sub(r"\s+", " ", frag).strip()
+        return frag.strip("<>/\"'` \t")
+
+    for marker in _LOGIN_FAIL_MARKERS:
+        for m in re.finditer(re.escape(marker), text):
+            a = max(0, m.start() - 30)
+            b = min(len(text), m.end() + 30)
+            frag = _clean(text[a:b])
+            if marker in frag:
+                return frag[:_FAIL_SNIPPET_MAX]
+    # 兜底：抓一个「错误/失败/不正确」类的整句
+    m = re.search(r"[^<>\n]{0,25}(?:错误|失败|不正确|无效)[^<>\n]{0,25}", text)
+    if m:
+        frag = _clean(m.group(0))
+        if frag:
+            return frag[:_FAIL_SNIPPET_MAX]
+    return None
 
 
 def _parse_cookies(text: str) -> dict:
@@ -98,7 +179,7 @@ class HuangGuabaPlugin(BasePlugin):
     display_name = "黄瓜吧"
     description = ("黄瓜吧 (huangguaba.com) 每日签到。支持 Cookie 直连或账号密码"
                    "（自动过算术验证码，登录后回写 Cookie 复用）。")
-    version = "1.0"
+    version = "1.1"
     plugin_type = "http"
     author = "checkin-system"
 
@@ -159,33 +240,63 @@ class HuangGuabaPlugin(BasePlugin):
 
     # ------------------------------------------------------------------
     def _do_login(self, session, site_url, username, password):
-        """登录：取算术验证码 → 计算 → POST login.php → 校验登录态"""
+        """登录：取算术验证码 → 计算 → POST login.php → 校验登录态
+
+        ⚠️ 取题目的顺序**必须是「接口优先」**：
+
+            ① GET /api/captcha.php  → 服务端把新题目+答案一起绑到当前 session
+            ② （仅当①失败）读页面 <span id="captchaQ"> 的题目
+
+        反过来做会踩坑（v1.0 实测）：页面上的 captchaQ 和服务端存的答案是
+        **两次生成**的，刷新验证码后两者不同步，算出来的答案永远错，
+        服务端就把登录页原样返回（用户看到一串 input 标签当错误消息）。
+        """
         login_url = f"{site_url}/login.php"
 
-        # 1) 打开登录页：拿到 session 绑定的验证码题目
+        # 1) 打开登录页 —— 主要是为了拿到 session cookie
         try:
             r = session.get(login_url, timeout=20)
         except requests.RequestException as e:
-            return False, f"打开登录页失败：{e}"
-        m = re.search(r'id="captchaQ"[^>]*>\s*([^<]+?)\s*<', r.text)
-        question = m.group(1) if m else None
+            # 连不上就说连不上。原先把「打开登录页失败」和「取不到验证码题目」
+            # 混为一谈，用户会跑去查页面结构，方向全错。
+            return False, (f"无法访问站点（{site_url}）："
+                           f"{type(e).__name__}，请检查网址是否正确、"
+                           f"服务器能否联网")
 
-        # 兜底：页面上没有题目时走接口（同样绑定 session）
-        if not question:
+        # 2) 取验证码题目：接口优先（session 绑定最准），页面兜底
+        #    ⚠️ 三类失败必须分开报，否则用户会往错误方向排查：
+        #       · 连不上（ConnectionError/Timeout）→ 网址或网络问题
+        #       · 返回了但不是 JSON（JSONDecodeError）→ 站点改版 / 被反代改写
+        #       · 返回了 JSON 但没 question 字段 → 站点改版
+        #       原先一律报「取不到题目（页面结构可能变化）」，把网络问题也
+        #       归进去，用户跑去翻页面结构，方向全错。
+        question = None
+        api_error = None
+        try:
+            r2 = session.get(f"{site_url}/api/captcha.php", timeout=15)
             try:
-                r2 = session.get(f"{site_url}/api/captcha.php", timeout=15)
                 question = (r2.json() or {}).get("question")
-            except Exception:                       # noqa: BLE001
-                question = None
-        if not question:
-            return False, "取不到算术验证码题目（页面结构可能变化）"
+            except ValueError:
+                api_error = f"接口返回非 JSON（HTTP {r2.status_code}）"
+        except requests.RequestException as e:
+            api_error = f"{type(e).__name__}"
 
-        # 2) 计算答案
+        if not question:
+            m = re.search(r'id="captchaQ"[^>]*>\s*([^<]+?)\s*<', r.text)
+            question = m.group(1) if m else None
+        if not question:
+            if api_error:
+                return False, (f"无法访问站点（{site_url}）：{api_error}。"
+                               f"请检查网址是否正确、服务器能否联网访问该站")
+            return False, (f"取不到算术验证码（{site_url}/api/captcha.php "
+                           f"没有 question 字段），站点可能已改版")
+
+        # 3) 计算答案
         answer = solve_arithmetic(question)
         if answer is None:
             return False, f"无法解析算术验证码：{question!r}"
 
-        # 3) 提交登录
+        # 4) 提交登录
         try:
             r = session.post(
                 login_url,
@@ -197,20 +308,21 @@ class HuangGuabaPlugin(BasePlugin):
         except requests.RequestException as e:
             return False, f"登录请求失败：{e}"
 
-        # 4) 校验登录态（以首页实际状态为准，不猜响应结构）
+        # 5) 校验登录态（以首页实际状态为准，不猜响应结构）
         logged, page = self._is_logged_in(session, site_url)
         if logged:
             return True, "登录成功"
 
-        # 从登录响应或首页提取可读的失败原因
-        for src in (r.text, page or ""):
-            for marker in _LOGIN_FAIL_MARKERS:
-                if marker in src:
-                    # 尽量带上前后文，方便定位（如"验证码错误"）
-                    m2 = re.search(r"[^><]{0,30}" + re.escape(marker) +
-                                   r"[^><]{0,30}", src)
-                    return False, f"登录失败：{m2.group(0).strip() if m2 else marker}"
-        return False, f"登录失败（HTTP {r.status_code}），请检查用户名/密码"
+        # 6) 失败：优先从响应里挑「人话」，挑不到再给一句保守结论。
+        #    ⚠️ 绝不能把整段 HTML 当消息 —— 那会显示成一串 input 标签残片。
+        reason = _human_fail_reason(r.text) or _human_fail_reason(page or "")
+        if reason:
+            return False, f"登录失败：{reason}"
+        if r.status_code >= 500:
+            return False, f"登录失败：站点返回 HTTP {r.status_code}，稍后再试"
+        return False, (f"登录失败（HTTP {r.status_code}）："
+                       f"请确认用户名/密码正确，"
+                       f"或该账号是否要求先完成验证（如 App 端）")
 
     # ------------------------------------------------------------------
     def _do_sign(self, session, site_url):

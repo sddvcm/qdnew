@@ -1,6 +1,7 @@
 """Flask 应用入口"""
 import os
 import sys
+from datetime import timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -45,7 +46,6 @@ def create_app():
     app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
 
     init_db()
-
     # 可选组件（本地验证码识别包）—— 必须在插件加载前注入 sys.path，
     # 否则插件 import captcha 时找不到用户上传的 ddddocr 等库。
     from app import extras
@@ -54,6 +54,18 @@ def create_app():
             log.info("已加载本地识别组件包")
     except Exception as e:            # noqa: BLE001 —— 组件坏了不该阻止启动
         log.warning("加载组件包失败（忽略）：%s", e)
+
+    # 访问鉴权（密码保护）。必须在注册蓝图**之前**挂上 before_request，
+    # 否则存在一个极短的窗口期：应用刚起、钩子还没装，此时访问无需密码。
+    from app import auth
+    # 安装向导里设的初始密码：读一次、落哈希、删明文（幂等，出错不阻断启动）
+    try:
+        if auth.apply_wizard_password():
+            log.info("已应用安装向导中设置的访问密码")
+    except Exception as e:            # noqa: BLE001
+        log.warning("应用向导密码失败（忽略，可用默认密码登录）：%s", e)
+    app.before_request(auth.check_auth)
+    app.permanent_session_lifetime = timedelta(days=auth.SESSION_DAYS)
 
     try:
         load_all_plugins()
@@ -66,8 +78,9 @@ def create_app():
 
     from app.routes import (index, task_api, plugin_api, notify_api,
                             system_api, har_api, update_api, extras_api,
-                            transfer_api)
+                            transfer_api, auth_api)
     app.register_blueprint(index.bp)
+    app.register_blueprint(auth_api.bp)
     app.register_blueprint(task_api.bp, url_prefix="/api/tasks")
     app.register_blueprint(plugin_api.bp, url_prefix="/api/plugins")
     app.register_blueprint(notify_api.bp, url_prefix="/api/notify")
@@ -91,7 +104,9 @@ def create_app():
             v = updater.current_version().get("version", "0")
         except Exception:                       # noqa: BLE001
             v = "0"
-        return {"app_version": v}
+        return {"app_version": v,
+                # 全局提示用：鉴权开着且还是默认密码时，界面要常驻催改
+                "auth_default_pw": auth.IS_DEFAULT_PASSWORD}
 
     @app.errorhandler(404)
     def not_found(e):

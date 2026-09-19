@@ -1,14 +1,36 @@
 #!/bin/bash
 # 卸载后执行：根据卸载向导的选择决定是否删除用户数据。
 # 默认保留（var=@appdata 与 etc=@appconf 在 fnOS 卸载时不被自动清除），
-# 用户在卸载向导打开「同时删除全部数据」时才清理。
+# 用户在卸载向导里选「删除全部数据」时才清理。
+#
+# ⚠️ 两个变量名都要认：
+#   · data_action —— 现在向导用的是 radio（keep / delete），对齐官方样例
+#   · purge_data  —— 老版本向导用的开关型字段，保留兼容，别让老流程失效
+#     为什么从 switch 换成 radio：fnpack 对 `{"type":"switch"}` 直接报
+#     `File "uninstall" is not valid due to JSON format or content validation
+#     failure`，装机时校验不过（踩过）。
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/common.sh" 2>/dev/null
 
-if [ "${purge_data:-false}" = "true" ] || [ "${purge_data}" = "True" ]; then
-    rm -rf "$VAR_DIR" "$ETC_DIR" "$SHARE_ROOT" 2>/dev/null
+purge="false"
+case "${data_action:-}" in
+    delete|DELETE|Delete|true|True|1) purge="true" ;;
+esac
+case "${purge_data:-}" in
+    true|True|1) purge="true" ;;
+esac
+
+if [ "$purge" = "true" ]; then
+    # ⚠️ 只删这三处，不加 -f 之外的激进参数；路径变量为空时逐条判空，
+    #    避免 `rm -rf ""` 或误删当前目录。
+    for p in "$VAR_DIR" "$ETC_DIR" "$SHARE_ROOT"; do
+        [ -n "$p" ] && [ -e "$p" ] || continue
+        rm -rf "$p" 2>/dev/null
+    done
     log_msg "uninstall_callback: 用户选择删除数据，已清理 var/etc/@appshare"
+else
+    log_msg "uninstall_callback: 保留用户数据（重装后自动恢复）"
 fi
 
 exit 0

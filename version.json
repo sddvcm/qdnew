@@ -1,7 +1,7 @@
 {
   "name": "checkin-system",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "released_at": "2026-09-19",
   "min_python": "3.10",
-  "notes": "新增黄瓜吧 (huangguaba.com) 签到插件：站点为自研 CMS（非 Discuz），需账号密码或 Cookie；验证码为算术题文本，插件自动计算作答，无需打码；支持 Cookie 失效自动回退账号密码重登并回写 Cookie"
+  "notes": "新增访问密码保护（默认密码 123456，可在安装向导或系统设置中修改）；FPK 安装向导支持自定义访问端口与访问密码；修复黄瓜吧插件登录失败（验证码改为接口取题，失败原因不再显示 HTML 残片）"
 }

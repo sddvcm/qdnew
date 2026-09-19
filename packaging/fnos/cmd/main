@@ -48,6 +48,7 @@ start_app() {
     CHECKIN_DATA_DIR_SRC="$DATA_ROOT_SRC" \
     CHECKIN_USER_PLUGINS_DIR="$USER_PLUGINS_DIR" \
     CHECKIN_LOG_DIR="$LOG_DIR" \
+    CHECKIN_ETC_DIR="$ETC_DIR" \
     PYTHONUNBUFFERED=1 \
     nohup "$PY_BIN" -u -m app.main >> "$LOG_FILE" 2>&1 &
     local pid=$!
