@@ -1,6 +1,1 @@
-{
-    "port-config": {
-        "protocol-file": "checkin-system.sc"
-    },
-    "systemd-unit": {}
-}
+{}

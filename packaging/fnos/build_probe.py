@@ -44,6 +44,12 @@ ICON_1PX = (
     b"\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
 )
 
+# 其余 8 个生命周期脚本的极简实现（探针只需存在，不做任何事）
+STUB_SCRIPT = (
+    b"#!/bin/bash\n"
+    b"exit 0\n"
+)
+
 MAIN_SCRIPT = (
     b"#!/bin/bash\n"
     b"# probe stub: every lifecycle command succeeds\n"
@@ -105,16 +111,17 @@ def build_manifest(md5: str, with_os_min: bool) -> bytes:
         ("appname", APPNAME),
         ("version", VERSION),
         ("display_name", "FPK Probe"),
-        ("platform", "x86"),
-        ("maintainer", "sddvcm"),
-        ("maintainer_url", "https://github.com/sddvcm/qdnew"),
-        ("distributor", "sddvcm"),
-        ("distributor_url", "https://github.com/sddvcm/qdnew"),
-        ("desktop_uidir", "ui"),
-        ("desktop_applaunchname", f"{APPNAME}.main"),
         ("desc", "fnOS fpk structure probe. Safe to uninstall."),
+        ("platform", "x86"),
         ("source", "thirdparty"),
-        ("fpk_version", VERSION),
+        ("maintainer", "sddvcm"),
+        ("distributor", "sddvcm"),
+        ("maintainer_url", "https://github.com/sddvcm/qdnew"),
+        ("distributor_url", "https://github.com/sddvcm/qdnew"),
+        ("service_port", "1"),
+        ("checkport", "false"),
+        ("desktop_uidir", "ui"),
+        ("desktop_applaunchname", f"{APPNAME}.Application"),
         ("ctl_stop", "false"),
     ]
     if with_os_min:
@@ -122,7 +129,7 @@ def build_manifest(md5: str, with_os_min: bool) -> bytes:
         fields.insert(-1, ("os_min_version", "1.1.8"))
     fields.append(("checksum", md5))
     width = max(len(k) for k, _ in fields)
-    return ("\n".join(f"{k.ljust(width)} = {v}" for k, v in fields) + "\n").encode()
+    return ("\r\n".join(f"{k.ljust(width)} = {v}" for k, v in fields) + "\r\n").encode()
 
 
 def build_probe(with_os_min: bool) -> str:
@@ -131,34 +138,37 @@ def build_probe(with_os_min: bool) -> str:
 
     # ---- app.tgz（极小：README + ui/）----
     app_buf = io.BytesIO()
-    with tarfile.open(fileobj=app_buf, mode="w:gz", format=tarfile.GNU_FORMAT) as tf:
-        add_bytes(tf, "./README.txt", b"fpk structure probe\n", MODE_FILE)
-        add_dir(tf, "./ui/")
-        add_bytes(tf, "./ui/config", UI_CONFIG, MODE_FILE)
-        add_dir(tf, "./ui/images/")
-        add_bytes(tf, "./ui/images/icon_64.png", ICON_1PX, MODE_FILE)
-        add_bytes(tf, "./ui/images/icon_256.png", ICON_1PX, MODE_FILE)
+    with tarfile.open(fileobj=app_buf, mode="w:gz", format=tarfile.USTAR_FORMAT) as tf:
+        add_bytes(tf, "README.txt", b"fpk structure probe\n", MODE_FILE)
+        add_dir(tf, "ui/")
+        add_bytes(tf, "ui/config", UI_CONFIG, MODE_FILE)
+        add_dir(tf, "ui/images/")
+        add_bytes(tf, "ui/images/icon_64.png", ICON_1PX, MODE_FILE)
+        add_bytes(tf, "ui/images/icon_256.png", ICON_1PX, MODE_FILE)
     app_tgz = app_buf.getvalue()
     md5 = hashlib.md5(app_tgz).hexdigest()
 
     # ---- 组装 fpk（结构与正式包一致）----
     os.makedirs(DIST, exist_ok=True)
     out_buf = io.BytesIO()
-    with tarfile.open(fileobj=out_buf, mode="w:gz", format=tarfile.GNU_FORMAT) as tf:
+    with tarfile.open(fileobj=out_buf, mode="w:gz", format=tarfile.USTAR_FORMAT) as tf:
         add_bytes(tf, "ICON.PNG", ICON_1PX, MODE_FILE)
         add_bytes(tf, "ICON_256.PNG", ICON_1PX, MODE_FILE)
         add_bytes(tf, "app.tgz", app_tgz, MODE_FILE)
         add_dir(tf, "cmd/")
+        # ⚠️ 必须补全 9 个生命周期脚本：relay-monitor（实测可装）就是完整 9 个，
+        # 早期探针只放 cmd/main 是设计失误 —— 缺脚本可能被校验器判为包不完整。
         add_bytes(tf, "cmd/main", MAIN_SCRIPT, MODE_EXEC)
+        for extra in ("install_init", "install_callback", "upgrade_init",
+                      "upgrade_callback", "uninstall_init", "uninstall_callback",
+                      "config_init", "config_callback"):
+            add_bytes(tf, f"cmd/{extra}", STUB_SCRIPT, MODE_EXEC)
         add_dir(tf, "config/")
         add_bytes(tf, "config/privilege", PRIVILEGE, MODE_FILE)
         add_bytes(tf, "config/resource", RESOURCE_EMPTY, MODE_FILE)
         add_bytes(tf, "manifest", build_manifest(md5, with_os_min), MODE_FILE)
-        add_dir(tf, "ui/")
-        add_bytes(tf, "ui/config", UI_CONFIG, MODE_FILE)
-        add_dir(tf, "ui/images/")
-        add_bytes(tf, "ui/images/icon_64.png", ICON_1PX, MODE_FILE)
-        add_bytes(tf, "ui/images/icon_256.png", ICON_1PX, MODE_FILE)
+        # ⚠️ 不在 fpk 顶层放 ui/ —— 基准 relay-monitor 顶层只有
+        # app.tgz/cmd/config/ICON.PNG/ICON_256.PNG/manifest/wizard，ui 仅在 app.tgz 内
         add_dir(tf, "wizard/")
         add_bytes(tf, "wizard/uninstall", WIZARD_UNINSTALL, MODE_FILE)
 

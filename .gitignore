@@ -56,3 +56,12 @@ token.txt
 packaging/fnos/build/
 packaging/fnos/dist/
 packaging/fnos/*.log
+
+# ---- fpk 打包：fnpack 项目目录与中间产物 ----
+packaging/fnos/build/fnpack_src/
+packaging/fnos/build/payload/
+packaging/fnos/build/*.tar
+packaging/fnos/build/wheels/
+packaging/fnos/build/app.tgz
+packaging/fnos/*.log
+packaging/fnos/tools/fnpack.exe

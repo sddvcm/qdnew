@@ -70,7 +70,10 @@ MODE_DIR = 0o755
 MODE_FILE = 0o644
 MODE_EXEC = 0o755
 BUILD_TIME = int(time.time())
-TAR_FORMAT = tarfile.GNU_FORMAT   # 真实样本 magic = "ustar "（GNU 风格）
+# ⚠️ tar 格式：用 POSIX（USTAR，magic "ustar\0"）。
+# 实测两个能装的包：relay-monitor 用 POSIX、ddns-go 用 GNU，两种都能装，
+# 所以格式不是死因；跟 relay-monitor（用户自己能装的那个）保持一致最保险。
+TAR_FORMAT = tarfile.USTAR_FORMAT
 
 
 def log(msg):
@@ -182,15 +185,23 @@ def tar_filter_transform(info: tarfile.TarInfo) -> tarfile.TarInfo:
 
 
 def build_app_tgz(stage: str, out_path: str):
-    """应用载荷。⚠️ 成员名带 "./" 前缀 + GNU 格式 —— 对齐 GNU tar 的真实产物。"""
-    log("打包 app.tgz（GNU 格式，./ 前缀）…")
-    with tarfile.open(out_path, "w:gz", format=TAR_FORMAT) as tf:
+    """应用载荷。
+
+    ⚠️ 成员名**绝不能带 "./" 前缀**。这一条是拿「自己能装的 relay-monitor 2.0.0」
+    实测出来的：它的 app.tgz 成员是 `config` / `python` / `src` / `ui` / `wheels`
+    这样的裸名字；早前对齐 ddns-go 时误加了 "./" 前缀，导致 fnOS 解包后
+    找不到 app/ ui/ 等顶层目录 → 装机报「应用包不符合系统要求」。
+
+    ⚠️ tar 格式用 POSIX（magic "ustar\\0"）—— relay-monitor 用 POSIX 能装，
+    ddns-go 用 GNU 也能装，两者都行，跟 POSIX 保持一致最保险。
+    """
+    log("打包 app.tgz（POSIX 格式，裸成员名无 ./ 前缀）…")
+    with tarfile.open(out_path, "w:gz", format=tarfile.USTAR_FORMAT) as tf:
         for dirpath, dirnames, filenames in os.walk(stage):
             dirnames.sort()
             for name in sorted(dirnames + filenames):
                 fp = os.path.join(dirpath, name)
-                rel = os.path.relpath(fp, stage).replace("\\", "/")
-                arcname = "./" + rel
+                arcname = os.path.relpath(fp, stage).replace("\\", "/")
                 if os.path.isdir(fp):
                     info = tarfile.TarInfo(arcname)
                     info.type = tarfile.DIRTYPE
@@ -226,29 +237,41 @@ def add_dir(tf, arcname):
 
 
 def build_manifest(version: str, md5: str) -> bytes:
-    """⚠️ 字段集 = 实测可装的 ddns-go 样本 + 官方文档确认的 ctl_stop。
-    绝不加 os_min_version（三种变体并存 = 校验雷区）。等号两边带空格。"""
+    """manifest 字段集 —— 以「用户自己能装的 relay-monitor 2.0.0」为基准。
+
+    与 relay-monitor 的对齐关系：
+      - 保留 os_min_version（relay-monitor 写 0.8.0 能装 → 该字段合法）
+      - 保留 checkport（relay-monitor 有）
+      - 保留 changelog（relay-monitor 有）
+      - desktop_applaunchname 用 `.Application` 后缀（relay-monitor 就是这写法，
+        ddns-go 也是；官方文档示例的 `.main` 反而不是实测主流）
+      - 不加 fpk_version（实测可装的 relay-monitor 没有该字段）
+    """
     fields = [
         ("appname", APPNAME),
         ("version", version),
         ("display_name", "签到管理系统"),
+        ("desc", "轻量级插件化自动签到平台。内置完整 Python 运行时，安装后无需联网下载；"
+                 "支持 HAR 抓包模板、验证码识别、7 种通知渠道与程序内自动更新。"),
         ("platform", "x86"),
-        ("maintainer", "sddvcm"),
-        ("maintainer_url", "https://github.com/sddvcm/qdnew"),
-        ("distributor", "sddvcm"),
-        ("distributor_url", "https://github.com/sddvcm/qdnew"),
-        ("desktop_uidir", "ui"),
-        ("desktop_applaunchname", f"{APPNAME}.main"),
-        ("service_port", "5800"),
-        ("desc", "轻量级插件化自动签到平台，内置完整运行时，"
-                 "支持 HAR 抓包模板、验证码识别、通知推送与程序内自动更新。"),
         ("source", "thirdparty"),
-        ("fpk_version", version),
+        ("maintainer", "sddvcm"),
+        ("distributor", "sddvcm"),
+        ("maintainer_url", "https://github.com/sddvcm/qdnew"),
+        ("distributor_url", "https://github.com/sddvcm/qdnew"),
+        ("os_min_version", "0.8.0"),
+        ("service_port", "5800"),
+        ("checkport", "true"),
+        ("desktop_uidir", "ui"),
+        ("desktop_applaunchname", f"{APPNAME}.Application"),
         ("ctl_stop", "true"),
+        ("changelog", f"v{version}: 内置运行时原生打包；程序内自动更新"),
         ("checksum", md5),
     ]
     width = max(len(k) for k, _ in fields)
     lines = [f"{k.ljust(width)} = {v}" for k, v in fields]
+    # ⚠️ 换行用 LF（纯 \n）。relay-monitor（实测可装）的 manifest 就是 LF；
+    # 早期看到的 \r\n 是读文件时的误判，已实测否定。
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
@@ -267,13 +290,9 @@ def build_sc_file() -> bytes:
 
 
 def build_resource() -> bytes:
-    """资源声明。port-config 必须指向 fpk 根的 {appname}.sc；
-    systemd-unit 空对象与 ddns-go 样本一致。"""
-    obj = {
-        "port-config": {"protocol-file": f"{APPNAME}.sc"},
-        "systemd-unit": {},
-    }
-    return (json.dumps(obj, ensure_ascii=False, indent=4) + "\n").encode("utf-8")
+    """资源声明。⚠️ 对齐 relay-monitor（实测可装）—— 它的 config/resource 仅 46B，
+    是最简形式；早期加的 port-config/systemd-unit 属凭空发明，已移除。"""
+    return b"{}\n"
 
 
 def build_fpk(version: str):
@@ -379,31 +398,29 @@ def main():
         for d in ("cmd", "config", "ui", "ui/images", "wizard"):
             if d not in dirs:
                 problems.append(f"缺少目录成员: {d}")
-        # GNU magic
+        # tar magic（POSIX，与实测可装的 relay-monitor 一致）
         with open(out, "rb") as f:
             import gzip as _gz
             raw = _gz.decompress(f.read())
             magic = raw[257:263]
-            if magic != b"ustar ":
-                problems.append(f"tar magic 不是 GNU 风格: {magic!r}")
+            if magic != b"ustar\x00":
+                problems.append(f"tar magic 应为 POSIX(ustar\\0): {magic!r}")
         # manifest：按 dict 解析校验
         mtext = tf.extractfile("manifest").read().decode()
         mdict = {}
-        for line in mtext.split("\n"):
-            if "=" in line:
+        for line in mtext.split("\r\n" if "\r\n" in mtext else "\n"):
+            if "=" in line and not line.strip().startswith(";"):
                 k, v = line.split("=", 1)
                 mdict[k.strip()] = v.strip()
         expect = {
             "appname": APPNAME, "version": version, "platform": "x86",
             "service_port": "5800", "desktop_uidir": "ui",
-            "desktop_applaunchname": f"{APPNAME}.main",
-            "source": "thirdparty", "fpk_version": version, "ctl_stop": "true",
+            "desktop_applaunchname": f"{APPNAME}.Application",
+            "source": "thirdparty", "ctl_stop": "true",
         }
         for k, v in expect.items():
             if mdict.get(k) != v:
                 problems.append(f"manifest[{k}] = {mdict.get(k)!r} != {v!r}")
-        if any(k.startswith("os_min") for k in mdict):
-            problems.append("manifest 不应包含 os_min* 字段")
         # checksum 与 app.tgz 实际 md5 一致
         declared = mdict.get("checksum", "")
         actual = hashlib.md5(tf.extractfile("app.tgz").read()).hexdigest()
@@ -417,17 +434,21 @@ def main():
                     problems.append(f"cmd 脚本缺少执行位: {n}")
                 if b"\r\n" in tf.extractfile(n).read():
                     problems.append(f"cmd 脚本含 CRLF: {n}")
-        # app.tgz 里的关键文件（./ 前缀）
+        # app.tgz 里的关键文件（裸成员名，⚠️ 绝不能有 ./ 前缀）
         with tarfile.open(os.path.join(BUILD, "app.tgz"), "r:gz") as atf:
             anames = set(atf.getnames())
-            for need in ("./app/main.py", "./updater.py", "./captcha.py",
-                         "./version.json", "./ui/config",
-                         "./ui/images/icon_64.png",
-                         "./har/render.py", "./plugins/base.py",
-                         "./templates/base.html", "./runtime.tar"):
+            bad_prefix = [n for n in anames if n.startswith("./")]
+            if bad_prefix:
+                problems.append(f"app.tgz 成员不应带 ./ 前缀，发现 {len(bad_prefix)} 个"
+                                f"（例: {bad_prefix[:3]}）")
+            for need in ("app/main.py", "updater.py", "captcha.py",
+                         "version.json", "ui/config",
+                         "ui/images/icon_64.png",
+                         "har/render.py", "plugins/base.py",
+                         "templates/base.html", "runtime.tar"):
                 if need not in anames:
                     problems.append(f"app.tgz 缺少: {need}")
-            rt = atf.getmember("./runtime.tar")
+            rt = atf.getmember("runtime.tar")
             if rt.size < 100 * 1024 * 1024:
                 problems.append(f"runtime.tar 疑似不完整: {rt.size} bytes")
 
