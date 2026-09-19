@@ -1,15 +1,15 @@
 {
   "name": "checkin-system",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "released_at": "2026-09-19",
-  "notes": "修复任务表单「消息推送」区样式错位：全局 CSS 的 width:100% 误伤了复选框（被拉成整行宽、文字挤到下一行），现已回退自然宽度；通知渠道改为卡片式勾选（选中有高亮边框），长渠道名自动截断不撑破布局",
+  "notes": "自动更新改为后台执行并显示进度：进度条 + 百分比 + 当前阶段（下载校验 / 备份 / 写入）与文件名，不再只有一个「更新中」；更新期间重复点击会被拒绝",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "3be5458f97c1874ce3c7a20330adb15d7660bf42d40fdc39460c55920492a10e",
     "app/engine.py": "3d95ee4e150ba4cc6b35637e7a49e6ec78c5bae4769b80e9009395e6161b34ef",
     "app/extras.py": "cfd2b9c9ced273f2bdfdd684d6289d349079c26ebcc861de01ac28cc0ebb3c4d",
     "app/fnos.py": "17699e5f6446da76989dbe25bd5b84b39c034ea743c94f128ea2df8b51555299",
-    "app/main.py": "994ec9e3ff76f4e711a530f0de46f7c199cfc986464db089d49da587e2054596",
+    "app/main.py": "de1ce5632b110b24b9488bf12353bb80bd2acdfb14f4ab226656e48a3bdfaaa3",
     "app/models.py": "995e59e017753f5f27d4efc4d4063f56d7c5f258121e86ebd48929d29263ef3f",
     "app/notifier.py": "183d8d0306692427c6616b5fedacca340b9fa791445028effa02a8874df1fa71",
     "app/plugin_loader.py": "18f21609ec7c7ee8e80b2ec9d7f3ded28a903c37ecceb96e08dabc75c7195264",
@@ -23,7 +23,7 @@
     "app/routes/system_api.py": "a94421433b618fed8b2da85f3d516963c16e8c50b50c3299c89d577b44340a52",
     "app/routes/task_api.py": "f15ac1f089cb9e0574b7119bd588c3cd08e7dd91539cd76ac9a4f241a9533faf",
     "app/routes/transfer_api.py": "6242bd446d99de85f0b38df728f57ed1e747794c7895d38ab50d2587a307fe5c",
-    "app/routes/update_api.py": "8c6ba287017ccbf68559710d62d8ff6266c476a17285d10cf10b7c1bd87807ba",
+    "app/routes/update_api.py": "c0525ea3c7991cec81d4b97f45e3ac34731d96007000183a9ff2c8a5279fc8b2",
     "app/routes/__init__.py": "2231d15749360cdc2f16b10779b9ac5e206f9884c4f274149ec474ee1f6d5645",
     "app/static/css/app.css": "07e1814071e60141ef8c62514dbc981c2527c454dabe8b3fd439d7c4fa57d10a",
     "app/static/js/app.js": "f24035819e06961c487a1df0bc2712f5fe02d4aeab1f04008557d1a65478c439",
@@ -48,14 +48,14 @@
     "templates/har_new.html": "89ddc40a90f42c329236ae8e962b9ff0e3e38bbb49b815b58eba629b97574760",
     "templates/index.html": "c353c38935f04eb2d865b613e4c78867c4df59f34635a99ab37e5eb42662c61a",
     "templates/plugin_import.html": "6ff9455f5bd2cb6963fade2537a90d2db5bec9dec8613c0d2d954d755413a9ec",
-    "templates/settings.html": "125999d2ec4169dfbf3b885a825bffe6cdd87bc9c8608713ffd442228323ff97",
+    "templates/settings.html": "b3ce8fd36f2c162ff967f382667b228a51b98054c199b888a38ae181aef22c78",
     "templates/task_form.html": "cf0b63d5640a9a5cb6fff751a85036b0fcddbae452a3fdf269437ba5ff4a91bb",
     ".env.example": "dd2d7cd04bf50554183da61460b66b4cb4811776f312af2a46739fbb3d1ec338",
     "DEVELOPMENT.md": "4a88e63895d3f77976364d349fe77a6270d6c05ac1cca56af221a603c73f5806",
     "README.md": "7c89f6263d9a8573b5d4dae31fce8f151c1ee36b46fa129b747cc6fdf7e44c66",
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
-    "updater.py": "e8f59a2de5fda21311dd42a587cc41afe954496431b6db9ac303d57fa6f937c0",
-    "version.json": "0c528ee966a943a615d284d92c2dc88f76ab2ec359668b346490a7fdd5a766b6"
+    "updater.py": "c1f56911e2d0f0c7a28c8516fbc3f9d1fdc23957f77c5de6eaa9cac473f0bf35",
+    "version.json": "f99c97742813b89a17dab2319114f624282e0df52f37867e634b8ba703c85607"
   }
 }

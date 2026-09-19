@@ -67,7 +67,20 @@ def create_app():
     def server_error(e):
         return jsonify({"error": "Internal server error"}), 500
 
+    global _APP_INSTANCE
+    _APP_INSTANCE = app
     return app
+
+
+# 后台线程（如自动更新的进度上报线程）里没有请求上下文，
+# `current_app` 会直接抛异常。这里留一个应用实例引用给它们用。
+# 本程序是单进程单应用，模块级变量足够；取不到就返回 None，调用方按"跳过"处理。
+_APP_INSTANCE = None
+
+
+def get_app_instance():
+    """获取当前 Flask 应用实例（供无请求上下文的代码使用）"""
+    return _APP_INSTANCE
 
 
 if __name__ == "__main__":

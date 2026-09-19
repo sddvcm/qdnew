@@ -287,6 +287,8 @@
 {% raw %}
 const NEED_RESTART_HINT = '更新已写入，插件已重载。若涉及核心模块（app/、har/）的改动，' +
   '建议重启容器以确保完全生效。';
+const NO_RESTART_HINT = '模板、静态文件与插件的改动已即时生效，刷新页面即可看到新界面；' +
+  '本次未涉及核心模块，无需重启。';
 
 async function loadStatus() {
   try {
@@ -441,37 +443,103 @@ async function doUpdate() {
   if (!confirm('确定更新？程序会下载并覆盖部分代码文件。\n\n更新前会自动备份到 data/backups/，' +
                '但仍建议确认更新源可信。')) return;
   const btn = document.getElementById('doUpdateBtn');
+  const box = document.getElementById('updateResult');
   if (btn) { btn.disabled = true; btn.textContent = '更新中…'; }
+
+  // 先画进度条（0%），再发起请求 —— 请求立刻返回，进度靠轮询
+  box.innerHTML = renderProgress({percent: 0, message: '正在准备…', phase: 'starting'});
   try {
     const r = await fetch('/api/update/run', {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}',
     });
     const d = await r.json();
-    const res = d.result || {};
     if (!d.success) {
+      box.innerHTML = errBox(d.message || '更新失败');
       showToast('error', d.message || '更新失败');
-      document.getElementById('updateResult').innerHTML =
-        `<div style="padding:12px; border-radius:8px; background:#fef2f2; color:#b91c1c;
-          font-size:13px; white-space:pre-wrap;">${esc(d.message || '更新失败')}</div>`;
+      if (btn) { btn.disabled = false; btn.textContent = '立即更新'; }
       return;
     }
-    showToast('success', d.message);
-    document.getElementById('updateResult').innerHTML = `
-      <div style="padding:14px; border-radius:8px; background:#f0fdf4;
-                  border:1px solid #bbf7d0; font-size:13px; line-height:1.8;">
-        <strong>更新成功，当前版本 ${esc(res.version)}</strong><br>
-        写入 ${res.files.length} 个文件，备份在 <code>${esc(res.backup_dir)}</code><br>
-        <span style="color:#b45309;">${esc(NEED_RESTART_HINT)}</span>
-        ${d.reload_error ? '<br><span style="color:#b91c1c;">插件重载报错：' +
-          esc(d.reload_error) + '</span>' : ''}
-      </div>`;
-    loadStatus();
+    // 轮询进度直到结束
+    const done = await pollUpdateProgress(box);
+    if (done && done.success) {
+      const res = done.result || {};
+      showToast('success', done.message);
+      box.innerHTML = `
+        <div style="padding:14px; border-radius:8px; background:#f0fdf4;
+                    border:1px solid #bbf7d0; font-size:13px; line-height:1.8;">
+          <strong>更新成功，当前版本 ${esc(res.version)}</strong><br>
+          写入 ${res.file_count || 0} 个文件，备份在 <code>${esc(res.backup_dir || '')}</code><br>
+          <span style="color:#b45309;">${esc(res.need_restart ? NEED_RESTART_HINT : NO_RESTART_HINT)}</span>
+          ${res.reload_error ? '<br><span style="color:#b91c1c;">插件重载报错：' +
+            esc(res.reload_error) + '</span>' : ''}
+        </div>`;
+      loadStatus();
+    } else if (done) {
+      box.innerHTML = errBox(done.error || done.message || '更新失败');
+      showToast('error', done.error || done.message || '更新失败');
+    }
   } catch(e) {
+    box.innerHTML = errBox('更新请求失败：' + e.message);
     showToast('error', '更新请求失败：' + e.message);
   } finally {
-    const b = document.getElementById('doUpdateBtn');
-    if (b) { b.disabled = false; b.textContent = '立即更新'; }
+    if (btn) { btn.disabled = false; btn.textContent = '立即更新'; }
   }
+}
+
+// ---- 更新进度：进度条 + 百分比 + 当前文件 ----
+// 更新要下载几十个文件（走代理可能几十秒），只给一个「更新中」用户分不清
+// 是在跑还是卡住了，所以做成进度条 + 实时文案。
+function renderProgress(p) {
+  const pct = Math.max(0, Math.min(100, parseInt(p.percent) || 0));
+  const phaseNames = {
+    starting: '准备', fetching: '下载并校验', backing_up: '备份现有文件',
+    writing: '写入新文件', done: '完成',
+  };
+  const phase = phaseNames[p.phase] || '处理中';
+  return `
+    <div style="padding:14px; border-radius:8px; background:var(--bg);
+                border:1px solid var(--border); font-size:13px;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+        <span>${esc(phase)}${p.total ? '（' + (p.done || 0) + '/' + p.total + '）' : ''}</span>
+        <strong style="font-family:var(--mono);">${pct}%</strong>
+      </div>
+      <div style="height:8px; border-radius:4px; background:var(--border); overflow:hidden;">
+        <div style="height:100%; width:${pct}%; background:var(--primary);
+                    transition: width 0.3s ease;"></div>
+      </div>
+      <div style="margin-top:8px; color:var(--text-muted); font-size:12px;
+                  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+        ${esc(p.message || '')}
+      </div>
+    </div>`;
+}
+
+function errBox(msg) {
+  return `<div style="padding:12px; border-radius:8px; background:#fef2f2; color:#b91c1c;
+          font-size:13px; white-space:pre-wrap;">${esc(msg)}</div>`;
+}
+
+// 每秒查一次进度，直到 running 变 false。
+// 上限 30 分钟：下载大文件 + 慢代理可能很久，但也不能无限轮询。
+async function pollUpdateProgress(box) {
+  const MAX_TICKS = 1800;
+  for (let i = 0; i < MAX_TICKS; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    let p;
+    try {
+      const r = await fetch('/api/update/progress');
+      p = await r.json();
+    } catch (e) {
+      continue;                    // 网络抖动：跳过这轮，下轮再试
+    }
+    if (p.running) {
+      box.innerHTML = renderProgress(p);
+      continue;
+    }
+    box.innerHTML = renderProgress(Object.assign({percent: 100}, p));
+    return p;
+  }
+  return {success: false, error: '更新超时（超过 30 分钟仍未完成），请查看日志'};
 }
 
 // ==================== 通知推送 ====================

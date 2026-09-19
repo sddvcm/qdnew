@@ -379,12 +379,26 @@ def _hash_content(data: bytes) -> str:
 # ============================ 执行更新 ============================
 
 def run_update(source: str, allow_downgrade: bool = False,
-               proxy: Optional[str] = None) -> Dict:
+               proxy: Optional[str] = None, progress=None) -> Dict:
     """执行更新：下载 → 校验 → 备份 → 写入。
 
     返回结构含 `updated` / `files` / `backup_dir` / `error`。
     **不做重启**：调用方（路由）负责在返回后重载插件。
+
+    progress: 可选回调 `progress(phase, done, total, message)`。
+        用于把进度透出给界面 —— 整个更新要下载几十个文件（走代理可能几十秒），
+        没有进度用户只能看一个"更新中"干等，无法区分"在跑"和"卡住了"。
+        回调内部的异常一律吞掉：**进度上报失败绝不能影响更新本身**。
+        phase 取值：fetching / backing_up / writing / done
     """
+    def _report(phase, done, total, msg=""):
+        if progress is None:
+            return
+        try:
+            progress(phase, done, total, msg)
+        except Exception:                       # noqa: BLE001
+            pass
+
     out = {"updated": False, "version": "", "files": [], "backup_dir": "",
            "skipped": [], "error": ""}
     try:
@@ -417,8 +431,10 @@ def run_update(source: str, allow_downgrade: bool = False,
             raise UpdateError(f"{MANIFEST_NAME} 的 files 字段为空或格式不对")
 
         # ---- 阶段 1：全部下载 + 校验（任一失败则整体中止，不落地任何文件）----
+        total = len(files)
+        _report("fetching", 0, total, f"准备下载 {total} 个文件")
         staged: List[Tuple[str, bytes]] = []
-        for rel, expect_hash in files.items():
+        for idx, (rel, expect_hash) in enumerate(files.items(), 1):
             try:
                 safe = validate_path(rel)
             except UpdateError as e:
@@ -440,24 +456,28 @@ def run_update(source: str, allow_downgrade: bool = False,
                         "（可能传输损坏，或远端清单与文件不一致）"
                     )
             staged.append((safe, data))
+            _report("fetching", idx, total, f"下载校验 {idx}/{total}：{safe}")
 
         # ---- 阶段 2：备份 ----
+        _report("backing_up", 0, len(staged), "备份现有文件")
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_dir = os.path.join(BACKUP_DIR, stamp)
         os.makedirs(backup_dir, exist_ok=True)
         backed_up: List[Tuple[str, str]] = []  # (绝对路径, 备份相对路径)
-        for safe, _ in staged:
+        for i, (safe, _) in enumerate(staged, 1):
             target = os.path.join(ROOT, safe)
             if os.path.exists(target):
                 bkp = os.path.join(backup_dir, safe)
                 os.makedirs(os.path.dirname(bkp), exist_ok=True)
                 shutil.copy2(target, bkp)
                 backed_up.append((target, safe))
+            _report("backing_up", i, len(staged), f"备份 {i}/{len(staged)}")
 
         # ---- 阶段 3：写入（失败即回滚）----
+        _report("writing", 0, len(staged), "写入新文件")
         written: List[str] = []
         try:
-            for safe, data in staged:
+            for i, (safe, data) in enumerate(staged, 1):
                 target = os.path.join(ROOT, safe)
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 tmp = target + ".new"
@@ -465,6 +485,7 @@ def run_update(source: str, allow_downgrade: bool = False,
                     f.write(data)
                 os.replace(tmp, target)  # 原子替换，避免半截文件
                 written.append(safe)
+                _report("writing", i, len(staged), f"写入 {i}/{len(staged)}")
         except Exception as e:
             # 回滚已写入的文件
             for target, safe in backed_up:
@@ -494,6 +515,7 @@ def run_update(source: str, allow_downgrade: bool = False,
             "files": written,
             "backup_dir": os.path.relpath(backup_dir, ROOT).replace("\\", "/"),
         })
+        _report("done", len(written), len(written), f"已更新到 {latest}")
     except UpdateError as e:
         out["error"] = str(e)
     except requests.RequestException as e:
