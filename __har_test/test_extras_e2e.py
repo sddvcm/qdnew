@@ -129,6 +129,73 @@ check("6.1 测试通过并返回识别结果",
       r.status_code == 200 and d.get("success") and d.get("code") == "AB12", d)
 
 print()
+print("6.5 内置测试图必须是**真实可解码**的图片（回归：踩过手写假 PNG 的坑）")
+import base64 as _b64  # noqa: E402
+from app.routes.extras_api import _TEST_IMG_B64  # noqa: E402
+_img = _b64.b64decode(_TEST_IMG_B64)
+check("6.5.1 是 PNG 魔数", _img[:8] == b"\x89PNG\r\n\x1a\n", _img[:8])
+check("6.5.2 含 IHDR/IDAT/IEND 三个 chunk",
+      b"IHDR" in _img[:32] and b"IDAT" in _img and _img.rstrip().endswith(b"IEND\xaeB`\x82"))
+# 关键：能被真实解码（早先手写的假 PNG 魔数对但结构坏，PIL 抛
+# "cannot identify image file"，导致"测试本地识别"永远失败）
+try:
+    from PIL import Image
+    _im = Image.open(io.BytesIO(_img))
+    _im.load()                    # load() 才会真正解码全部数据
+    check("6.5.3 PIL 能完整解码", True)
+    check("6.5.4 尺寸合理（宽度>=50）", _im.size[0] >= 50, _im.size)
+except ImportError:
+    check("6.5.3 PIL 不可用（跳过）", True)
+except Exception as e:
+    check("6.5.3 PIL 能完整解码", False, f"{type(e).__name__}: {e}")
+
+# 逐 chunk 校验 CRC —— 手写假图最容易在这里出错
+import struct as _st, zlib as _zl  # noqa: E402
+_pos = 8
+_bad = []
+while _pos < len(_img):
+    _ln, = _st.unpack_from(">I", _img, _pos)
+    _typ = _img[_pos + 4:_pos + 8]
+    _data = _img[_pos + 8:_pos + 8 + _ln]
+    _crc, = _st.unpack_from(">I", _img, _pos + 8 + _ln)
+    if _zl.crc32(_typ + _data) & 0xFFFFFFFF != _crc:
+        _bad.append(_typ.decode("latin-1"))
+    _pos += 12 + _ln
+    if _typ == b"IEND":
+        break
+check("6.5.5 所有 chunk CRC 正确", not _bad, _bad)
+
+# 6.6 端到端：把"会校验图片"的假 ddddocr 装上，再打 test-local 接口。
+# 早先的假 ddddocr 直接 return 'AB12'，**根本不看图片** → 图片坏了也测不出来。
+# 这个版本模仿真 ddddocr：先解码图片，失败就报同样的错。
+_pack2 = io.BytesIO()
+with zipfile.ZipFile(_pack2, "w", zipfile.ZIP_DEFLATED) as zf:
+    zf.writestr("manifest.json", json.dumps({
+        "name": "captcha-local", "version": "3.0",
+        "python": "3.12", "platform": "linux_x86_64",
+        "provides": ["ddddocr", "numpy", "cv2", "onnxruntime"],
+    }))
+    for _m, _p in (("numpy", 100), ("cv2", 80), ("onnxruntime", 60)):
+        zf.writestr("site-packages/%s/__init__.py" % _m, "V=1\n" + "# pad\n" * _p)
+    zf.writestr("site-packages/ddddocr/__init__.py", (
+        "import io as _io\n"
+        "class DdddOcr:\n"
+        "    def __init__(self, show_ad=False): pass\n"
+        "    def classification(self, img):\n"
+        "        from PIL import Image\n"
+        "        im = Image.open(_io.BytesIO(img)); im.load()\n"
+        "        return 'AB12'\n"
+    ))
+r = c.post("/api/extras/upload",
+           data={"file": (io.BytesIO(_pack2.getvalue()), "p3.zip")},
+           content_type="multipart/form-data")
+check("6.6.1 装上会校验图片的假 ddddocr", r.get_json()["pack"]["installed"] is True)
+r = c.post("/api/extras/test-local")
+d = r.get_json()
+check("6.6.2 test-local 通过（说明喂进去的是合法图片）",
+      r.status_code == 200 and d.get("success"), d)
+
+print()
 print("7. 停用 / 重新启用")
 r = c.post("/api/extras/toggle", json={"enabled": False})
 check("7.1 停用成功", r.status_code == 200 and r.get_json()["pack"]["enabled"] is False)

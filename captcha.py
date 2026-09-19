@@ -196,6 +196,18 @@ def solve_local(image_bytes: bytes) -> str:
     try:
         code = (ocr.classification(image_bytes) or "").strip()
     except Exception as exc:
+        msg = str(exc)
+        # 图片解码失败是**输入问题**，不是组件问题 —— 提示要能指向真正的排查方向。
+        # 踩过的坑：早先内置测试图是手写的假 PNG（魔数对但结构坏），
+        # 报的却是 "cannot identify image file <_io.BytesIO object at 0x...>"，
+        # 完全看不出该去查什么。
+        if "cannot identify image" in msg or "UnidentifiedImage" in msg:
+            raise CaptchaError(
+                "给的图片无法被识别为有效图像（PNG/JPEG 结构损坏或格式不支持）。\n"
+                "如果这是「测试本地识别」报的错，说明是内置测试图有问题，"
+                "请更新程序；如果是正常任务报的错，"
+                "请检查站点返回的是否真的是图片（可能被风控返回了 HTML）。"
+            ) from exc
         raise CaptchaError(f"本地识别异常：{exc}") from exc
     if not code:
         raise CaptchaError("本地识别结果为空（图片可能不是验证码）")

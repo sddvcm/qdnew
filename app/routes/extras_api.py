@@ -180,13 +180,21 @@ def save_settings():
 
 # ==================== 本地识别自检 ====================
 
-# 一张 100x32 的简单验证码风格图（白底黑字 "AB12"），用于确认模型能跑起来。
-# 不追求识别准确（字体不是训练集风格），只验证：库能 import、模型能加载、
-# 前向推理能跑通 —— 这三件事成了，本地识别就基本可用。
+# 一张 100x32 的白底黑块图，用于确认本地识别链路能跑通。
+#
+# ⚠️ 必须是**真实合法**的 PNG（含 IHDR/IDAT/IEND 三个 chunk 与正确 CRC）。
+# 踩过的坑：早先这里手写了一段"看着像 base64 的字符串"，PNG 魔数对得上，
+# 但后面的 chunk 结构不合法 —— PIL 直接抛 "cannot identify image file"，
+# 于是「测试本地识别」永远失败，看起来像组件坏了，其实是测试图本身是坏的。
+# 这个 base64 由 struct+zlib 真实生成并用 PIL 打开验证过。
+#
+# 不追求识别准确（图形不是 ddddocr 训练集风格），只验证：
+# 图片能解码 → 模型能加载 → 前向推理能跑通。
 _TEST_IMG_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAGQAAAAgCAIAAAD5UZ9WAAAAXklEQVR4nO3RMQEAIAzAsIF/"
-    "z0VGHiQKej1zZmae7wfgU4sWLVq0aNGiRYsWLVq0aNGiRYsWLVq0aNGiRYsWLVq0aNGiRYsW"
-    "LVq0aNGiRYsWLVq0aNGiRYsWLVq0aNGi5VcLJQGBAe+h8yYAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAGQAAAAgCAIAAABrSUp5AAAAfElEQVR42u3ZWQoAIAgFwO5/6bpC"
+    "C2Xi+C88Biqx1j+rNl0B2WDBggULVjGsqLjnWPe4r2CdOFbECjkmibGivLJixVzDsEpgvffKjfXY"
+    "Kz3WfLKio8NeOFiwtuLCWuuFtdbrNYzfWMCCBQsWrI+xUo4OPixgwYIFC1YZrAFKxEUpKCP7KwAA"
+    "AABJRU5ErkJggg=="
 )
 
 

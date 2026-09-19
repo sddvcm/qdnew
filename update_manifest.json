@@ -1,8 +1,8 @@
 {
   "name": "checkin-system",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "released_at": "2026-09-19",
-  "notes": "新增「任务导出/导入」：把任务、HAR 模板、通知渠道（含账号密码）导出为加密配置文件 .qdpack，只有本程序能读取，可备份/换机迁移/分享；导入前可预览内容，同名项支持跳过/改名/覆盖三种策略",
+  "notes": "修复「测试本地识别」报 cannot identify image file 的问题：内置测试图是一张结构损坏的假 PNG，现已换成真实可解码的图片；同时把图片解码失败的报错改成可读提示（区分是测试图问题还是站点返回了非图片）",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "5f6349210f7fd5be3908ba252eb49a444d277be0b68e002bb1b97bebccf9b1df",
@@ -14,7 +14,7 @@
     "app/plugin_loader.py": "18f21609ec7c7ee8e80b2ec9d7f3ded28a903c37ecceb96e08dabc75c7195264",
     "app/scheduler.py": "f3cbe87a43489887e4bd88a3b5a1c98c7f37da17842b34aa9cd11f3e1cb8e64f",
     "app/transfer.py": "be270a6b7fe9d175d799b93ee3c6e1b78135bb09fb8a7e0577b3f149bcdd6a0c",
-    "app/routes/extras_api.py": "28fa2dbd4e891a9eafa8ac52eaaab4f6a3b9dfb7d8695d990a346f1afcea83f2",
+    "app/routes/extras_api.py": "f2ecbca351b685a38b298bc4f6f2373b528bd852203431c6bdcd8379f3801df5",
     "app/routes/har_api.py": "05ea114467603d1d6272167cda7655d832984d8541c0cda44c7a4c23ca8aadd0",
     "app/routes/index.py": "54c504acf10e9ef6894ee6b67f797e12d674d01f8609b85ce2f99fd0be65a682",
     "app/routes/notify_api.py": "fdda8d3b9f4b96abfc748f52784197a0cd2cb122dfda91d2c347119bdda0e8f0",
@@ -52,9 +52,9 @@
     ".env.example": "dd2d7cd04bf50554183da61460b66b4cb4811776f312af2a46739fbb3d1ec338",
     "DEVELOPMENT.md": "ef5cd71c00b9256b5eae22513872f9ab35bfa6144ad249165120cba8ca2dab2d",
     "README.md": "7c89f6263d9a8573b5d4dae31fce8f151c1ee36b46fa129b747cc6fdf7e44c66",
-    "captcha.py": "3007688cf1a735db77112c75ce9dfa1f124e2874c910f07911d12ab75d199c41",
+    "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
     "updater.py": "3be1dbd4746a421593bd98d7014cee2de3ab61d405ca963ae8956cae66e48214",
-    "version.json": "73b161ad5821dc5b1d7ab9dcbd49ee8e4bcdbc56f52077b24e58544205dfe96c"
+    "version.json": "53dcbcde3e9bcc7317439d3606671571612ba91ff573d5ca204f45c9b4c335a5"
   }
 }
