@@ -122,48 +122,60 @@ check("5.2 已回读 local",
       r.get_json()["config"]["backend"] == "local")
 
 print()
-print("6. 测试本地识别（会真的构造 DdddOcr）")
+print("6. 测试本地识别（会真的构造 DdddOcr，跑全部内置样图）")
 r = c.post("/api/extras/test-local")
 d = r.get_json()
-check("6.1 测试通过并返回识别结果",
-      r.status_code == 200 and d.get("success") and d.get("code") == "AB12", d)
+check("6.1 测试通过", r.status_code == 200 and d.get("success"), d)
+res = d.get("results") or []
+check("6.2 返回逐张结果（4 张样图）", len(res) == 4, len(res))
+check("6.3 全部识别成功且结果正确（假 ddddocr 返回 AB12）",
+      all(x.get("ok") and x.get("code") == "AB12" for x in res),
+      res)
+check("6.4 结果带文件名与描述",
+      [x.get("name") for x in res] == ["1.png", "2.png", "3.jpg", "4.jpg"],
+      [x.get("name") for x in res])
 
 print()
 print("6.5 内置测试图必须是**真实可解码**的图片（回归：踩过手写假 PNG 的坑）")
 import base64 as _b64  # noqa: E402
-from app.routes.extras_api import _TEST_IMG_B64  # noqa: E402
-_img = _b64.b64decode(_TEST_IMG_B64)
-check("6.5.1 是 PNG 魔数", _img[:8] == b"\x89PNG\r\n\x1a\n", _img[:8])
-check("6.5.2 含 IHDR/IDAT/IEND 三个 chunk",
-      b"IHDR" in _img[:32] and b"IDAT" in _img and _img.rstrip().endswith(b"IEND\xaeB`\x82"))
-# 关键：能被真实解码（早先手写的假 PNG 魔数对但结构坏，PIL 抛
-# "cannot identify image file"，导致"测试本地识别"永远失败）
-try:
-    from PIL import Image
-    _im = Image.open(io.BytesIO(_img))
-    _im.load()                    # load() 才会真正解码全部数据
-    check("6.5.3 PIL 能完整解码", True)
-    check("6.5.4 尺寸合理（宽度>=50）", _im.size[0] >= 50, _im.size)
-except ImportError:
-    check("6.5.3 PIL 不可用（跳过）", True)
-except Exception as e:
-    check("6.5.3 PIL 能完整解码", False, f"{type(e).__name__}: {e}")
-
-# 逐 chunk 校验 CRC —— 手写假图最容易在这里出错
-import struct as _st, zlib as _zl  # noqa: E402
-_pos = 8
-_bad = []
-while _pos < len(_img):
-    _ln, = _st.unpack_from(">I", _img, _pos)
-    _typ = _img[_pos + 4:_pos + 8]
-    _data = _img[_pos + 8:_pos + 8 + _ln]
-    _crc, = _st.unpack_from(">I", _img, _pos + 8 + _ln)
-    if _zl.crc32(_typ + _data) & 0xFFFFFFFF != _crc:
-        _bad.append(_typ.decode("latin-1"))
-    _pos += 12 + _ln
-    if _typ == b"IEND":
-        break
-check("6.5.5 所有 chunk CRC 正确", not _bad, _bad)
+from app.routes.extras_api import _TEST_IMAGES  # noqa: E402
+check("6.5.0 样图共 4 张且含 JPEG", len(_TEST_IMAGES) == 4
+      and any(x["name"].endswith(".jpg") for x in _TEST_IMAGES),
+      [x["name"] for x in _TEST_IMAGES])
+_crc_checked = 0
+for _it in _TEST_IMAGES:
+    _img = _b64.b64decode(_it["b64"])
+    if _it["name"].endswith(".png"):
+        check(f"6.5.1[{_it['name']}] 是 PNG 魔数",
+              _img[:8] == b"\x89PNG\r\n\x1a\n", _img[:8])
+        # 逐 chunk 校验 CRC —— 手写假图最容易在这里出错
+        import struct as _st, zlib as _zl  # noqa: E402
+        _pos, _bad = 8, []
+        while _pos < len(_img):
+            _ln, = _st.unpack_from(">I", _img, _pos)
+            _typ = _img[_pos + 4:_pos + 8]
+            _crc, = _st.unpack_from(">I", _img, _pos + 8 + _ln)
+            if _zl.crc32(_typ + _img[_pos + 8:_pos + 8 + _ln]) & 0xFFFFFFFF != _crc:
+                _bad.append(_typ.decode("latin-1"))
+            _pos += 12 + _ln
+            if _typ == b"IEND":
+                break
+        _crc_checked += 1
+        check(f"6.5.5[{_it['name']}] 所有 chunk CRC 正确", not _bad, _bad)
+    # 所有人（含 JPEG）都要能被 PIL 完整解码
+    try:
+        from PIL import Image
+        _im = Image.open(io.BytesIO(_img))
+        _im.load()
+        check(f"6.5.3[{_it['name']}] PIL 完整解码 {_im.format}{_im.size}", True)
+        check(f"6.5.4[{_it['name']}] 尺寸像验证码（60~200 x 24~64）",
+              60 <= _im.size[0] <= 200 and 24 <= _im.size[1] <= 64, _im.size)
+    except ImportError:
+        check(f"6.5.3[{_it['name']}] PIL 不可用（跳过）", True)
+    except Exception as e:
+        check(f"6.5.3[{_it['name']}] PIL 完整解码", False,
+              f"{type(e).__name__}: {e}")
+check("6.5.6 至少 1 张 PNG 参与了 CRC 校验", _crc_checked >= 1)
 
 # 6.6 端到端：把"会校验图片"的假 ddddocr 装上，再打 test-local 接口。
 # 早先的假 ddddocr 直接 return 'AB12'，**根本不看图片** → 图片坏了也测不出来。

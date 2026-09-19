@@ -1,8 +1,8 @@
 {
   "name": "checkin-system",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "released_at": "2026-09-19",
-  "notes": "修复「测试本地识别」报 cannot identify image file 的问题：内置测试图是一张结构损坏的假 PNG，现已换成真实可解码的图片；同时把图片解码失败的报错改成可读提示（区分是测试图问题还是站点返回了非图片）",
+  "notes": "「测试本地识别」改用云码官网的 4 张真实示例验证码（PNG+JPEG），逐张识别并展示结果，可自行对照准确率；上版本测试图损坏导致测试必失败的问题一并修复",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "5f6349210f7fd5be3908ba252eb49a444d277be0b68e002bb1b97bebccf9b1df",
@@ -14,7 +14,7 @@
     "app/plugin_loader.py": "18f21609ec7c7ee8e80b2ec9d7f3ded28a903c37ecceb96e08dabc75c7195264",
     "app/scheduler.py": "f3cbe87a43489887e4bd88a3b5a1c98c7f37da17842b34aa9cd11f3e1cb8e64f",
     "app/transfer.py": "be270a6b7fe9d175d799b93ee3c6e1b78135bb09fb8a7e0577b3f149bcdd6a0c",
-    "app/routes/extras_api.py": "f2ecbca351b685a38b298bc4f6f2373b528bd852203431c6bdcd8379f3801df5",
+    "app/routes/extras_api.py": "237021c0418d2f00569d52f10e9a3e6292b1bbb82afbf5e03aef93868c56414c",
     "app/routes/har_api.py": "05ea114467603d1d6272167cda7655d832984d8541c0cda44c7a4c23ca8aadd0",
     "app/routes/index.py": "54c504acf10e9ef6894ee6b67f797e12d674d01f8609b85ce2f99fd0be65a682",
     "app/routes/notify_api.py": "fdda8d3b9f4b96abfc748f52784197a0cd2cb122dfda91d2c347119bdda0e8f0",
@@ -47,7 +47,7 @@
     "templates/har_new.html": "89ddc40a90f42c329236ae8e962b9ff0e3e38bbb49b815b58eba629b97574760",
     "templates/index.html": "c353c38935f04eb2d865b613e4c78867c4df59f34635a99ab37e5eb42662c61a",
     "templates/plugin_import.html": "6ff9455f5bd2cb6963fade2537a90d2db5bec9dec8613c0d2d954d755413a9ec",
-    "templates/settings.html": "67ed8eaa1ecc52e13e4cbd088c0fddcca4eb5aaed3de3a5ce73c25f2a73ac5c3",
+    "templates/settings.html": "a3155bc2e8c3a4a169d255e850181ea05b066ed4de2be903c5cda8594bc324ca",
     "templates/task_form.html": "ce432baf6076eeece990d15b7dbe2fe838f27f8d9b3250fb00331473284578d7",
     ".env.example": "dd2d7cd04bf50554183da61460b66b4cb4811776f312af2a46739fbb3d1ec338",
     "DEVELOPMENT.md": "ef5cd71c00b9256b5eae22513872f9ab35bfa6144ad249165120cba8ca2dab2d",
@@ -55,6 +55,6 @@
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
     "updater.py": "3be1dbd4746a421593bd98d7014cee2de3ab61d405ca963ae8956cae66e48214",
-    "version.json": "53dcbcde3e9bcc7317439d3606671571612ba91ff573d5ca204f45c9b4c335a5"
+    "version.json": "c5e3fc16d466b1d253bcbea59bc5025419ece06a1dac1d4fcff6eeffec33559e"
   }
 }

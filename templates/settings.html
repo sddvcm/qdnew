@@ -119,8 +119,7 @@
     <button class="btn btn-primary" id="saveCaptchaCfgBtn" onclick="saveCaptchaCfg()">
       保存识别设置</button>
     <button class="btn" id="testLocalBtn" onclick="testLocalCaptcha()">测试本地识别</button>
-    <span id="extrasMsg" style="font-size: 12px; color: var(--text-muted);"></span>
-  </div>
+    <span id="extrasMsg" style="font-size: 12px; color: var(--text-muted);"></span>  </div>
 
   <div class="form-group" style="margin-top: 16px;">
     <label>上传本地识别组件包</label>
@@ -728,8 +727,31 @@ async function testLocalCaptcha() {
   try {
     const r = await fetch('/api/extras/test-local', {method: 'POST'});
     const d = await r.json();
-    if (d.success) extrasMsg(d.message, 'ok');
-    else extrasMsg(d.message || '测试失败', 'error');
+    if (d.success) {
+      extrasMsg(d.message, 'ok');
+      showToast('success', '本地识别可用');
+    } else {
+      extrasMsg(d.message || '测试失败', 'error');
+      showToast('error', (d.message || '测试失败').split('\n')[0]);
+    }
+    // 展示逐张结果
+    if (d.results && d.results.length) {
+      let html = '<div style="margin-top:8px; font-size:12px;">' +
+        '<strong>内置示例图识别结果</strong>（云码官网样图，可自行对照）<br>';
+      for (const x of d.results) {
+        html += x.ok
+          ? `　✅ <code>${esc(x.name)}</code> ${esc(x.desc || '')} → 识别为 <strong>${esc(x.code)}</strong><br>`
+          : `　❌ <code>${esc(x.name)}</code> ${esc(x.desc || '')} → ${esc(x.error || '失败')}<br>`;
+      }
+      html += '</div>';
+      const el = document.getElementById('extrasMsg');
+      el.insertAdjacentHTML('afterend', html);
+      const box = el.nextElementSibling;
+      if (box && !box.dataset.autoclear) {
+        box.dataset.autoclear = '1';
+        setTimeout(() => { if (box.parentNode) box.remove(); }, 30000);
+      }
+    }
   } catch(e) {
     extrasMsg('测试请求失败：' + e.message, 'error');
   } finally {
