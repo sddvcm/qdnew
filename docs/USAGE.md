@@ -129,14 +129,16 @@ PushPlus 能把签到结果直接推到微信。
 
 1. 准备一个公开的 GitHub 仓库放本项目代码
 2. 在项目根目录生成清单文件并提交到仓库：
-   系统设置页 → 填版本号 → 点「下载清单」→ 得到 `update_manifest.json` → 提交到仓库根目录
+   跑 `python -c "import updater,json;print(json.dumps(updater.build_manifest('版本号','说明'),ensure_ascii=False,indent=2))" > update_manifest.json`
+   → 把 `update_manifest.json` 提交到仓库根目录
 3. Web「系统设置」→ 填更新源 `https://github.com/你的用户名/仓库名` → 保存
 4. **确认 `docker-compose.yml` 里有 `- ./:/app` 挂载**（已默认加上）。
    没有这行的话，更新写进容器的文件在重建后会丢失。
 
 **日常升级**
 
-1. 改完代码 → 更新版本号 → 重新下载清单 → 提交到仓库
+1. 改完代码 → 改 `version.json` 版本号 → 重建清单 → 提交到仓库
+   （顺序不能反：清单要在所有代码改完之后重建，否则哈希对不上）
 2. 任意部署点：系统设置 → 「检查更新」→ 有新版就点「立即更新」
 3. 更新后插件自动重载；若改的是核心模块（`app/`、`har/`），**建议重启容器**完全生效
 

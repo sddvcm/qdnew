@@ -8,11 +8,12 @@ API：
     POST /api/update/config     保存更新源
     POST /api/update/check      检查是否有新版本（只读，不下载）
     POST /api/update/run        执行更新（下载+校验+写入+重载插件）
-    GET  /api/update/manifest   生成并下载本仓库的 update_manifest.json（发版用）
-"""
-import json
 
-from flask import Blueprint, Response, jsonify, render_template, request
+注：原先还有个 /api/update/manifest（在网页上生成清单下载，即「发版辅助」），
+已于 v1.5.5 移除 —— 发版在开发机上用 `updater.build_manifest()` 脚本化完成，
+更可靠（网页版只能哈希"当前这台机器"的文件，且容易忘记先改 version.json）。
+"""
+from flask import Blueprint, jsonify, render_template, request
 
 import updater
 from app.database import get_db
@@ -185,20 +186,3 @@ def run():
         "reload_error": reload_error,
         "need_restart": True,
     })
-
-
-@bp.route("/api/update/manifest", methods=["GET"])
-def manifest():
-    """生成当前代码的清单（发版时下载下来提交到仓库根目录）"""
-    version = request.args.get("version", "").strip()
-    notes = request.args.get("notes", "").strip()
-    if not version:
-        version = updater.current_version().get("version", "0.0.0")
-    data = updater.build_manifest(version, notes)
-    payload = json.dumps(data, ensure_ascii=False, indent=2)
-    return Response(
-        payload,
-        mimetype="application/json",
-        headers={"Content-Disposition":
-                 f"attachment; filename*=UTF-8''update_manifest.json"},
-    )

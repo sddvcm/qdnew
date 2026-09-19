@@ -500,9 +500,16 @@ r = client.post("/api/update/check")
 check("3.23 未配置源时提示明确", r.status_code == 400
       and "更新源" in (r.get_json().get("message") or ""), r.get_json())
 
-# 3.24 清单下载接口
+# 3.24 「发版辅助」已移除（v1.5.5）
+# 原先的 GET /api/update/manifest 是在网页上生成清单用的，现已删除：
+# 发版在开发机上脚本化完成（见 packaging/fnos/build_with_fnpack.py 流程），
+# 更可靠。这里断言接口真的不存在了，防止被无意加回来。
 r = client.get("/api/update/manifest?version=2.0.0")
-check("3.24 清单下载接口可用", r.status_code == 200 and b"files" in r.data, r.status_code)
+check("3.24 发版辅助接口已移除", r.status_code == 404, r.status_code)
+# 设置页也不应再出现相关 UI
+_html = client.get("/settings").get_data(as_text=True)
+check("3.24b 设置页无「发版辅助」",
+      "发版辅助" not in _html and "downloadManifest" not in _html)
 
 # 3.25 导航含设置入口
 r = client.get("/")

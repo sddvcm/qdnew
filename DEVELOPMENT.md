@@ -817,11 +817,21 @@ https://api.github.com/repos/sddvcm/qdnew
 **发版流程**（改完代码后）：
 
 ```bash
-# 方式一：Web 系统设置页 → 填版本号 → 点「下载清单」
-# 方式二：命令行
-python -c "import updater,json;print(json.dumps(updater.build_manifest('1.3.0','说明'),ensure_ascii=False,indent=2))" > update_manifest.json
+# 1) 先改 version.json 的版本号与说明（顺序不能反！）
+# 2) 重建清单（务必在改完所有代码之后，否则哈希对不上）
+python -c "import updater,json;print(json.dumps(updater.build_manifest('1.5.4','说明'),ensure_ascii=False,indent=2))" > update_manifest.json
+# 3) 打包（会顺带把清单同步进 payload）
+python packaging/fnos/build_with_fnpack.py
 ```
+
 然后把改动 + `update_manifest.json` 一起提交到仓库根目录。
+
+⚠️ 顺序铁律：**改代码 → 改 version.json → 重建清单 → 打包 → 提交**。
+任何一步反了都会导致远端哈希与文件不符，用户点更新时报「文件校验失败」。
+
+> v1.5.5 起移除了设置页里的「发版辅助」（网页生成清单的按钮）：
+> 它只能哈希"当前这台机器"的文件，容易忘记先改 version.json，
+> 而且 fpk 装机后代码目录是只读快照。发版统一走上面的命令行流程。
 
 ### 16.6 `docker-compose.yml` 的代码挂载
 
