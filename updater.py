@@ -94,6 +94,9 @@ ALLOWED_ROOT_FILES = {
     "captcha.py", "updater.py", "app.py", "run.py",
     # 部署模板：新装用户需要它来生成 .env。注意真正的 .env 仍在
     # NEVER_OVERWRITE 里，绝不允许被更新覆盖。
+    # ⚠️ 它不在 fpk 包内（fpk 用 etc/app.env 由装机脚本生成），但必须在清单里：
+    # Docker 部署的用户要靠自动更新拿到这个模板。所以「包内自校验」时
+    # 它必然缺席，属正常。
     ".env.example",
 }
 # 永不覆盖的文件（含敏感配置）

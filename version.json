@@ -1,7 +1,7 @@
 {
   "name": "checkin-system",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "released_at": "2026-09-19",
   "min_python": "3.10",
-  "notes": "修复「检查更新」报 403 rate limit exceeded：不再调用 api.github.com 查询默认分支（GitHub 未认证限流 60次/时/出口IP，走代理时共用节点极易被跑满），改为直接用 main、读不到再兜底探测 master（走 raw 域名，不计 API 额度）"
+  "notes": "系统设置页改为左侧导航分页（程序更新 / 通知推送 / 验证码识别 / 任务导出导入 / 历史备份），不再是一长条；支持 /settings#notify 这样的锚点直达，窄屏自动转为横向滚动导航"
 }

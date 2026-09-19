@@ -230,9 +230,16 @@ def sync_source_into_payload():
     只覆盖文件、不删除 payload 独有内容（runtime.tar / ui / __pycache__ 等）。
     """
     log("同步源码 → build/payload …")
-    dirs = ("app", "har", "plugins", "templates")
+    # docs/ 也要同步：它虽然不是运行时代码，但 update_manifest.json 里**列了**它，
+    # 不同步就会导致「包内清单自校验」失败（实测 docs/*.md、DEVELOPMENT.md 哈希不符）。
+    dirs = ("app", "har", "plugins", "templates", "docs")
+    # ⚠️ update_manifest.json 必须在列表里：它虽然是「更新时永不覆盖」的文件，
+    # 但 fpk 包内要带一份**当前版本**的清单作为出厂基准。漏了它 → payload 里
+    # 一直留着最早那次打包的老清单（实测曾是 1.2.1/48 文件），
+    # 装机后「检查更新」拿老清单比对会得出错误结论。
     files = ("captcha.py", "updater.py", "version.json", "requirements.txt",
-             "requirements-captcha.txt")
+             "requirements-captcha.txt", "update_manifest.json",
+             "DEVELOPMENT.md", "README.md")
     for d in dirs:
         s_root = os.path.join(ROOT, d)
         d_root = os.path.join(PAYLOAD, d)

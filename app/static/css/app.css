@@ -22,6 +22,79 @@ a:hover { text-decoration: underline; }
 
 .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
+/* ==================== 设置页：左导航 + 右内容 ====================
+   设置项越来越多（更新/通知/验证码/导入导出/备份），平铺一长条太难找。
+   改成左侧固定导航分页：切换只做 display，不重建 DOM，
+   保证各区块里已有的 JS（读取/保存/渲染）继续有效。 */
+.settings-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.settings-nav {
+  flex: 0 0 188px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 8px;
+  position: sticky;
+  top: 80px;                 /* 顶部 header 56px + 一点间距 */
+}
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.settings-nav-item:hover { background: var(--bg); color: var(--text); }
+.settings-nav-item.active {
+  background: var(--primary-light);
+  color: var(--primary);
+  font-weight: 500;
+}
+.settings-nav-icon {
+  width: 16px;
+  text-align: center;
+  font-size: 14px;
+  flex: 0 0 auto;
+  opacity: .85;
+}
+.settings-body {
+  flex: 1;
+  min-width: 0;              /* 防止内部长内容把 flex 撑破 */
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+}
+/* 分页面板：默认隐藏，激活时显示 */
+.settings-pane { display: none; }
+.settings-pane.active { display: block; }
+/* 分页里的首个标题不需要上边距（原来是为平铺分隔加的） */
+.settings-pane > .section-title:first-child { margin-top: 0 !important; }
+
+/* 窄屏：导航转为横向滚动条，避免挤压内容 */
+@media (max-width: 760px) {
+  .settings-layout { flex-direction: column; gap: 12px; }
+  .settings-nav {
+    flex: none;
+    width: 100%;
+    position: static;
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 6px;
+  }
+  .settings-nav-item { flex: 0 0 auto; }
+  .settings-body { width: 100%; }
+}
+
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 20px; overflow: hidden; }
 .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .card-header h2 { font-size: 15px; font-weight: 600; }

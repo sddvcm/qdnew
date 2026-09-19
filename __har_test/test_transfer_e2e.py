@@ -279,6 +279,20 @@ check("9.1 /settings 200", r.status_code == 200)
 for k in ("任务导出 / 导入", "doExport", "inspectPack", "doImport"):
     check(f"9.2 页面含 {k}", k in html)
 
+# 9.3 设置页分页结构（左侧导航 + 右侧面板必须一一对应）
+import re as _re  # noqa: E402
+_nav = _re.findall(r'settings-nav-item[^>]*data-pane="(\w+)"', html)
+_panes = _re.findall(r'settings-pane[^>]*data-pane="(\w+)"', html)
+check("9.3 左侧导航 5 个分页",
+      _nav == ["update", "notify", "captcha", "transfer", "backup"], _nav)
+check("9.4 导航与面板一一对应", _nav == _panes, _panes)
+check("9.5 含分页切换函数", "showSettingsPane" in html
+      and "initSettingsNav" in html)
+check("9.6 默认激活的是程序更新页",
+      'settings-pane active" data-pane="update"' in html)
+check("9.7 div 标签配平",
+      len(_re.findall(r"<div\b", html)) == len(_re.findall(r"</div>", html)))
+
 print()
 print("10. 空库导出 / 空包导入")
 fresh_db()

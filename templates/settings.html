@@ -2,9 +2,28 @@
 {% block title %}系统设置 - 签到管理系统{% endblock %}
 
 {% block content %}
-<div class="card" style="max-width: 820px; margin: 0 auto;">
+<div class="card" style="max-width: 1100px; margin: 0 auto;">
   <div class="card-header"><h2>系统设置</h2></div>
 
+  <div class="settings-layout">
+    <!-- 左侧分页导航 -->
+    <nav class="settings-nav" id="settingsNav">
+      <div class="settings-nav-item active" data-pane="update">
+        <span class="settings-nav-icon">&#8635;</span>程序更新</div>
+      <div class="settings-nav-item" data-pane="notify">
+        <span class="settings-nav-icon">&#9993;</span>通知推送</div>
+      <div class="settings-nav-item" data-pane="captcha">
+        <span class="settings-nav-icon">&#9635;</span>验证码识别</div>
+      <div class="settings-nav-item" data-pane="transfer">
+        <span class="settings-nav-icon">&#8645;</span>任务导出 / 导入</div>
+      <div class="settings-nav-item" data-pane="backup">
+        <span class="settings-nav-icon">&#9737;</span>历史备份</div>
+    </nav>
+
+    <div class="settings-body">
+
+  <!-- ============ 分页 1：程序更新 ============ -->
+  <div class="settings-pane active" data-pane="update">
   <div class="section-title">程序更新</div>
 
   <div style="padding: 14px; background: var(--primary-light); border-radius: var(--radius);
@@ -65,7 +84,10 @@
     </div>
   </div>
 
-  <div class="section-title" style="margin-top: 26px;">通知推送</div>
+  </div>
+  <!-- ============ 分页 2：通知推送 ============ -->
+  <div class="settings-pane" data-pane="notify">
+  <div class="section-title">通知推送</div>
   <div class="help-text" style="margin-bottom: 10px;">
     配置推送渠道后，在「添加任务 / 编辑任务」页把渠道绑定到任务，签到成功/失败结果就会推送到微信等。
     渠道只在这里配置一次，多个任务可共用。
@@ -75,7 +97,10 @@
     <button class="btn btn-primary btn-sm" onclick="openNotifyModal()">+ 新增通知渠道</button>
   </div>
 
-  <div class="section-title" style="margin-top: 26px;">本地验证码识别</div>
+  </div>
+  <!-- ============ 分页 3：验证码识别 ============ -->
+  <div class="settings-pane" data-pane="captcha">
+  <div class="section-title">本地验证码识别</div>
   <div class="help-text" style="margin-bottom: 10px;">
     安装包默认<strong>不含</strong>本地识别所需的库（ddddocr + OpenCV + ONNX，约 400MB），
     验证码走云码。想用本地识别（免费、不联网、无额度限制）就在这里上传组件包开通，
@@ -147,7 +172,10 @@
          margin-top: 4px;">准备中…</div>
   </div>
 
-  <div class="section-title" style="margin-top: 26px;">任务导出 / 导入</div>
+  </div>
+  <!-- ============ 分页 4：任务导出 / 导入 ============ -->
+  <div class="settings-pane" data-pane="transfer">
+  <div class="section-title">任务导出 / 导入</div>
   <div class="help-text" style="margin-bottom: 10px;">
     导出一个<strong>加密的配置文件</strong>（后缀 <code>.qdpack</code>），用于备份、
     换机迁移或分享给别人。文件含账号密码，已用本程序专属密钥加密 ——
@@ -210,8 +238,15 @@
          margin-top: 4px;">准备中…</div>
   </div>
 
-  <div class="section-title" style="margin-top: 26px;">历史备份</div>
+  </div>
+  <!-- ============ 分页 5：历史备份 ============ -->
+  <div class="settings-pane" data-pane="backup">
+  <div class="section-title">历史备份</div>
   <div id="backupList" style="font-size: 12px; color: var(--text-secondary);">读取中…</div>
+  </div>
+
+    </div><!-- /settings-body -->
+  </div><!-- /settings-layout -->
 </div>
 
 <!-- 通知渠道 编辑弹窗 -->
@@ -1089,10 +1124,57 @@ function doImport() {
   xhr.send(fd);
 }
 
+// ==================== 设置页分页切换 ====================
+// 只切 display，不重建 DOM —— 各分页里已经绑定的事件/已渲染的内容都保留。
+// 支持 URL hash（如 /settings#notify 直接打开通知推送页），
+// 其他页面可用 showSettingsPane('backup') 跳转。
+function showSettingsPane(name, pushHash) {
+  if (!name) return;
+  const nav = document.getElementById('settingsNav');
+  if (!nav) return;
+  const items = nav.querySelectorAll('.settings-nav-item');
+  const panes = document.querySelectorAll('.settings-pane');
+  let hit = false;
+  items.forEach(el => {
+    const on = el.dataset.pane === name;
+    el.classList.toggle('active', on);
+    if (on) hit = true;
+  });
+  if (!hit) return;                 // 未知名字：保持当前页，别把内容全隐藏了
+  panes.forEach(el => el.classList.toggle('active', el.dataset.pane === name));
+  // 切页后回到顶部，否则长页滚下去看着像空白
+  window.scrollTo({top: 0, behavior: 'instant' in window ? 'instant' : 'auto'});
+  if (pushHash !== false) {
+    try { history.replaceState(null, '', '#' + name); } catch (e) {}
+  }
+  // 各分页首次显示时可能需要刷新数据（如备份列表）
+  if (typeof onPaneShown === 'function') { try { onPaneShown(name); } catch (e) {} }
+}
+
+function initSettingsNav() {
+  const nav = document.getElementById('settingsNav');
+  if (!nav) return;
+  nav.addEventListener('click', (e) => {
+    const item = e.target.closest('.settings-nav-item');
+    if (item) showSettingsPane(item.dataset.pane);
+  });
+  // 初始页：URL hash 优先
+  const h = (location.hash || '').replace('#', '');
+  if (h && nav.querySelector(`.settings-nav-item[data-pane="${h}"]`)) {
+    showSettingsPane(h, false);
+  }
+  // 浏览器前进/后退
+  window.addEventListener('hashchange', () => {
+    const n = (location.hash || '').replace('#', '');
+    if (n) showSettingsPane(n, false);
+  });
+}
+
 loadStatus();
 loadNotifies();
 loadExtras();
 loadTransferOptions();
+initSettingsNav();
 {% endraw %}
 </script>
 {% endblock %}

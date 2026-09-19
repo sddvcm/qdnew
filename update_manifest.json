@@ -1,8 +1,8 @@
 {
   "name": "checkin-system",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "released_at": "2026-09-19",
-  "notes": "修复「检查更新」报 403 rate limit exceeded：不再调用 api.github.com 查询默认分支（GitHub 未认证限流 60次/时/出口IP，走代理时共用节点极易被跑满），改为直接用 main、读不到再兜底探测 master（走 raw 域名，不计 API 额度）",
+  "notes": "系统设置页改为左侧导航分页（程序更新 / 通知推送 / 验证码识别 / 任务导出导入 / 历史备份），不再是一长条；支持 /settings#notify 这样的锚点直达，窄屏自动转为横向滚动导航",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "5f6349210f7fd5be3908ba252eb49a444d277be0b68e002bb1b97bebccf9b1df",
@@ -24,7 +24,7 @@
     "app/routes/transfer_api.py": "6242bd446d99de85f0b38df728f57ed1e747794c7895d38ab50d2587a307fe5c",
     "app/routes/update_api.py": "2a2513d465011538429ba68e6a1d534134d7b88327acfd493df0eabda2c83e4a",
     "app/routes/__init__.py": "2231d15749360cdc2f16b10779b9ac5e206f9884c4f274149ec474ee1f6d5645",
-    "app/static/css/app.css": "fd5386086a88d4eef9b80d5f317878927d0a34f2d7f31a82974828f42694459f",
+    "app/static/css/app.css": "d078575ec79d445489547168103f0c6b49a172a125af488f065cd8962e755927",
     "app/static/js/app.js": "f24035819e06961c487a1df0bc2712f5fe02d4aeab1f04008557d1a65478c439",
     "docs/DEPLOY-FNOS.md": "5821bf5a21d62544caf8c4bfc10abbb2ecdb07050ed5660c5c75b95534cc8328",
     "docs/hyperdown-handoff.md": "d9e983d0a2eed7e147c72d0f4225f31f41c9c1043b48d4c067a72cfcfd95af02",
@@ -47,14 +47,14 @@
     "templates/har_new.html": "89ddc40a90f42c329236ae8e962b9ff0e3e38bbb49b815b58eba629b97574760",
     "templates/index.html": "c353c38935f04eb2d865b613e4c78867c4df59f34635a99ab37e5eb42662c61a",
     "templates/plugin_import.html": "6ff9455f5bd2cb6963fade2537a90d2db5bec9dec8613c0d2d954d755413a9ec",
-    "templates/settings.html": "a3155bc2e8c3a4a169d255e850181ea05b066ed4de2be903c5cda8594bc324ca",
+    "templates/settings.html": "cc209bcd6f1407ca802e865a89afceccdb1112bef97dc29860ecef3f57e60665",
     "templates/task_form.html": "ce432baf6076eeece990d15b7dbe2fe838f27f8d9b3250fb00331473284578d7",
     ".env.example": "dd2d7cd04bf50554183da61460b66b4cb4811776f312af2a46739fbb3d1ec338",
     "DEVELOPMENT.md": "9d3b4d67de6c6118c3859d3b04776ca76dc8c0cde23254e626e0fdb3ec99534e",
     "README.md": "7c89f6263d9a8573b5d4dae31fce8f151c1ee36b46fa129b747cc6fdf7e44c66",
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
-    "updater.py": "921c66f5e449fc0f4c22f1bd9eb84d278bc2b118374ad285936cb80862b863e9",
-    "version.json": "76eb2675c0517c1386dc3293c1bda6a3141fc096e293e3d048f89cee5d616528"
+    "updater.py": "e8f59a2de5fda21311dd42a587cc41afe954496431b6db9ac303d57fa6f937c0",
+    "version.json": "0f67fbe6d81219f1d226717717316758d2f0b56239987ba7e8ee5384f5b6ce0b"
   }
 }
