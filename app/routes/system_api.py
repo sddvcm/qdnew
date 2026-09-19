@@ -6,6 +6,22 @@ from app.database import get_db
 bp = Blueprint("system_api", __name__)
 
 
+@bp.route("/env", methods=["GET"])
+def get_env():
+    """运行环境信息 —— 排查「数据到底存哪了 / 共享目录通不通」。
+
+    放在设置页的「环境信息」分页展示。所有探测都不抛异常，
+    读不到就如实回报原因（含 open API 的失败详情）。
+    """
+    from app import fnos
+
+    return jsonify({
+        "data": fnos.data_health(),
+        "platform": fnos.platform_config(),
+        "openapi_ready": fnos.openapi_available(),
+    })
+
+
 @bp.route("/config", methods=["GET"])
 def get_configs():
     db = get_db()

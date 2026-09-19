@@ -24,18 +24,28 @@ DEFAULT_PORT=5800
 #
 #     {"data-share": {"shares": [{"name": "checkin-system"}]}}
 #
-# 安装时 fnOS 会自动创建该共享目录（Windows ACL 权限模型）、并给应用运行用户
-# 授予访问权限，然后通过环境变量把路径告诉应用：
+# 安装时 fnOS 会自动创建该共享目录（Windows ACL 权限模型，不是 POSIX ACL）、
+# 并自动给应用运行用户授予访问权限。路径有**两个官方取径**：
 #
-#     TRIM_DATA_SHARE_PATHS=/vol1/@appshare/checkin-system[:更多路径]
+#   ① 稳定软链（推荐，不受环境变量注入与否影响）
+#        /var/apps/<appname>/share/<子目录>      ← /var/apps/<app>/shares/ 里的成员
+#      ⚠️ 注意：/var/apps/<appname>/shares/ 是**声明的每个 share 各自的软链集合**；
+#         文档原文「可以通过 /var/apps/myapp/share/ 下的软链访问对应目录」。
+#         实测两种拼写都存在过，所以这里把两个候选都探一遍（见 ensure_data_dir）。
+#   ② 环境变量
+#        TRIM_DATA_SHARE_PATHS=/vol1/@appshare/<app>[：更多路径]
+#      多路径用 ":" 分隔，取第一个（官方示例即 `${VAR%%:*}`）。
 #
-# ⚠️ 早期版本我们自己拼 @appshare 路径并 mkdir —— 那是错的：
+# ⚠️ **为什么必须两个都探**：TRIM_DATA_SHARE_PATHS 由系统注入到**生命周期脚本**
+#    的环境里，而常驻进程（以及某些版本下的 start 分支）不一定继承到它。
+#    只认环境变量 → 探测落空 → 退回私有目录（数据在文件管理器里又看不到了）。
+#    软链是文件系统层的，任何时候都在，更可靠。
+#
+# ⚠️ 早期版本（1.5.7）我们自己拼 @appshare 路径并 mkdir —— 那是错的：
 #    ①用户安装的应用默认没有建共享目录的权限，mkdir 必然失败；
 #    ②即使建出来也没有 ACL 授权，应用写不进去；
 #    ③结果 CHECKIN_DATA_DIR 指向不可写目录 → 建库失败 → 进程启动即崩。
-#    现在改成官方机制 + 可写性探测兜底，两条腿走路。
-#
-# 兼容性：多路径用 ":" 分隔，取第一个（官方示例也是 `${VAR%%:*}`）。
+#    现在：声明交给 fnOS 建、路径用官方取径、再加可写性探测兜底。
 if [ -n "${TRIM_DATA_SHARE_PATHS:-}" ]; then
     SHARE_ROOT="${TRIM_DATA_SHARE_PATHS%%:*}"
 elif [ -n "${wizard_share_path:-}" ]; then          # 安装向导传进来的（若有）
@@ -43,6 +53,10 @@ elif [ -n "${wizard_share_path:-}" ]; then          # 安装向导传进来的�
 else
     SHARE_ROOT=""                                   # 交给 ensure_data_dir 探测
 fi
+
+# 文档明示的稳定软链入口。两种拼写都作为候选（哪个存在用哪个）。
+APP_SHARES_DIR="/var/apps/${APP_NAME}"              # /var/apps/<app> 是安装后的应用目录
+SHARE_LINK_CANDIDATES="${APP_SHARES_DIR}/shares/${APP_NAME} ${APP_SHARES_DIR}/share/${APP_NAME}"
 
 # 兜底数据目录：@appdata（老行为）。共享目录不可用时回退到这里 ——
 # **宁可数据放私有目录，也不能让应用起不来**。
@@ -53,10 +67,26 @@ FALLBACK_ROOT="${VAR_DIR}"
 # 或 ACL 没授权），所以实际写一个探针文件。
 # 结果写入全局 DATA_ROOT，并导出 CHECKIN_DATA_DIR 供 Python 侧使用。
 DATA_ROOT=""
+DATA_ROOT_SRC=""                                    # 记录来源，便于排查"数据到底在哪、为什么"
 ensure_data_dir() {
-    local cand probe
-    for cand in "${SHARE_ROOT}" "${FALLBACK_ROOT}"; do
+    local cand probe link
+    # 候选顺序：软链 → 环境变量 → 私有兜底
+    # 软链优先是因为它由文件系统保证，不依赖环境变量注入。
+    local candidates=""
+    for link in $SHARE_LINK_CANDIDATES; do
+        [ -d "$link" ] && candidates="$candidates $link"
+    done
+    [ -n "$SHARE_ROOT" ] && candidates="$candidates $SHARE_ROOT"
+    candidates="$candidates $FALLBACK_ROOT"
+
+    for cand in $candidates; do
         [ -n "$cand" ] || continue
+        # ⚠️ 软链要取真实路径：后续 mv/cp 与 Python 侧记录都用它，
+        #    避免同一份数据出现两种写法导致迁移判断出错。
+        if [ -L "$cand" ]; then
+            cand=$(readlink -f "$cand" 2>/dev/null) || continue
+            [ -n "$cand" ] || continue
+        fi
         if mkdir -p "$cand/data" 2>/dev/null; then
             probe="${cand}/data/.write_probe_$$"
             if (echo ok > "$probe") 2>/dev/null; then
@@ -66,9 +96,19 @@ ensure_data_dir() {
             fi
         fi
     done
-    # 两个都不行：退回 VAR_DIR，让后续步骤自己报错（至少错误信息明确）
-    [ -n "$DATA_ROOT" ] || DATA_ROOT="${FALLBACK_ROOT}"
-    export DATA_ROOT
+
+    # 记录来源（供日志与 Python 侧诊断）
+    if [ "$DATA_ROOT" = "$FALLBACK_ROOT" ]; then
+        DATA_ROOT_SRC="私有兜底(@appdata)"
+    elif [ -n "$SHARE_ROOT" ] && [ "$DATA_ROOT" = "$SHARE_ROOT" ]; then
+        DATA_ROOT_SRC="共享目录(TRIM_DATA_SHARE_PATHS)"
+    elif [ -n "$DATA_ROOT" ]; then
+        DATA_ROOT_SRC="共享目录(软链)"
+    else
+        DATA_ROOT="${FALLBACK_ROOT}"                # 全都不行：退回私有，让后续报错更明确
+        DATA_ROOT_SRC="私有兜底(强制)"
+    fi
+    export DATA_ROOT DATA_ROOT_SRC
 }
 
 ensure_data_dir

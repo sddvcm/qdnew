@@ -24,12 +24,13 @@ start_app() {
     load_env_file
 
     # 明确记录数据落点，便于排查"数据在哪"
-    log_msg "start: 数据目录=$DATA_ROOT（共享=${TRIM_DATA_SHARE_PATHS:-无}）"
+    log_msg "start: 数据目录=$DATA_ROOT（来源=$DATA_ROOT_SRC）"
     log_msg "start: 启动 (port=${APP_PORT:-$DEFAULT_PORT})"
     cd "$APP_DIR" || return 1
     PORT="${APP_PORT:-$DEFAULT_PORT}" \
     CHECKIN_SECRET_KEY="${CHECKIN_SECRET_KEY:-}" \
     CHECKIN_DATA_DIR="$DATA_DIR" \
+    CHECKIN_DATA_DIR_SRC="$DATA_ROOT_SRC" \
     CHECKIN_USER_PLUGINS_DIR="$USER_PLUGINS_DIR" \
     nohup "$PY_BIN" -m app.main >> "$LOG_FILE" 2>&1 &
     local pid=$!

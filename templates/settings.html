@@ -18,6 +18,8 @@
         <span class="settings-nav-icon">&#8645;</span>任务导出 / 导入</div>
       <div class="settings-nav-item" data-pane="backup">
         <span class="settings-nav-icon">&#9737;</span>历史备份</div>
+      <div class="settings-nav-item" data-pane="env">
+        <span class="settings-nav-icon">&#9432;</span>环境信息</div>
     </nav>
 
     <div class="settings-body">
@@ -235,6 +237,21 @@
   <div class="settings-pane" data-pane="backup">
   <div class="section-title">历史备份</div>
   <div id="backupList" style="font-size: 12px; color: var(--text-secondary);">读取中…</div>
+  </div>
+
+  <!-- ============ 分页 6：环境信息 ============ -->
+  <div class="settings-pane" data-pane="env">
+  <div class="section-title">环境信息</div>
+
+  <div style="padding: 14px; background: var(--primary-light); border-radius: var(--radius);
+              font-size: 13px; color: var(--primary); line-height: 1.7; margin-bottom: 18px;">
+    数据（数据库、备份、插件、导出文件）默认存放在飞牛的共享目录里，
+    可以直接在 <b>文件管理</b> 中找到、复制和备份。
+  </div>
+
+  <div id="envBox" style="font-size: 13px; color: var(--text-secondary);">读取中…</div>
+
+  <button class="btn btn-sm" style="margin-top: 14px;" onclick="loadEnv()">重新检测</button>
   </div>
 
     </div><!-- /settings-body -->
@@ -1120,6 +1137,68 @@ function doImport() {
   xhr.send(fd);
 }
 
+// ==================== 环境信息 ====================
+// 数据目录 / 共享目录 / 飞牛系统信息 —— 排查「数据存哪了、有没有真的落到
+// 文件管理里能看到的共享目录」。后端所有探测都不抛异常，读不到会给原因。
+async function loadEnv() {
+  const box = document.getElementById('envBox');
+  if (!box) return;
+  box.textContent = '读取中…';
+  try {
+    const r = await fetch('/api/system/env');
+    const d = await r.json();
+    box.innerHTML = renderEnv(d);
+  } catch (e) {
+    box.innerHTML = `<span style="color:#b91c1c;">读取失败：${esc(e.message)}</span>`;
+  }
+}
+
+function renderEnv(d) {
+  const dt = d.data || {};
+  const pf = d.platform || {};
+  const ok = (b) => b ? '<span style="color:#15803d;">✔</span>'
+                      : '<span style="color:#b91c1c;">✘</span>';
+
+  const rows = [];
+  const row = (k, v) => rows.push(
+    `<div style="display:flex; gap:10px; padding:6px 0; border-bottom:1px solid var(--border);">
+       <div style="width:130px; flex:none; color:var(--text-muted);">${esc(k)}</div>
+       <div style="flex:1; word-break:break-all;">${v}</div>
+     </div>`);
+
+  row('数据目录', `<code style="font-family:var(--mono);">${esc(dt.data_dir || '未知')}</code>`);
+  row('落点来源', esc(dt.source || '未知') +
+      (dt.on_share ? '　<span style="color:#15803d;">（在共享目录里，文件管理可见）</span>'
+                   : '　<span style="color:#b45309;">（在私有目录，文件管理里看不到）</span>'));
+  row('可写', ok(dt.writable) + (dt.writable ? '' : ' 不可写 —— 请检查目录权限'));
+  row('运行环境', dt.is_fnpack ? '飞牛 fnOS（fpk）' : '普通环境（Docker / 本地开发）');
+  if (dt.total_mb) {
+    row('可用空间', `${dt.free_mb} MB / 共 ${dt.total_mb} MB`);
+  }
+
+  // 共享目录探测明细：把候选路径逐个列出来，方便定位是哪一环没接上
+  const links = dt.share_links || [];
+  row('共享目录', (dt.share_root
+        ? `<code style="font-family:var(--mono);">${esc(dt.share_root)}</code>`
+        : '<span style="color:#b45309;">未检测到（已回退私有目录）</span>')
+      + '<div style="margin-top:6px; font-size:12px; color:var(--text-muted);">'
+      + '<div>取径优先级：软链 → 环境变量 TRIM_DATA_SHARE_PATHS → 私有目录</div>'
+      + links.map(l => `<div>${ok(l.exists)} <code style="font-family:var(--mono);">${esc(l.path)}</code></div>`).join('')
+      + '</div>');
+
+  // 飞牛官方开放 API
+  row('开放 API', d.openapi_ready
+        ? ok(true) + ' 可用'
+        : ok(false) + ' 不可用<span style="color:var(--text-muted);">（非飞牛环境或未由系统启动）</span>');
+  if (pf.available) {
+    row('系统信息', `语言 ${esc(pf.system_language || '?')}　版本 ${esc(pf.system_version || '?')}`);
+  } else if (pf.error) {
+    row('系统信息', `<span style="color:var(--text-muted);">读不到：${esc(pf.error)}</span>`);
+  }
+
+  return `<div>${rows.join('')}</div>`;
+}
+
 // ==================== 设置页分页切换 ====================
 // 只切 display，不重建 DOM —— 各分页里已经绑定的事件/已渲染的内容都保留。
 // 支持 URL hash（如 /settings#notify 直接打开通知推送页），
@@ -1164,6 +1243,17 @@ function initSettingsNav() {
     const n = (location.hash || '').replace('#', '');
     if (n) showSettingsPane(n, false);
   });
+}
+
+// 分页首次显示时的按需加载。
+// ⚠️ 这里之前只被 showSettingsPane 调用、却没有定义 —— 分页切过去时
+//    环境信息不会加载（一直停在"读取中…"）。补上实现。
+//    备份列表由 loadStatus() 一并渲染，无需重复加载。
+const _paneLoaded = {};
+function onPaneShown(name) {
+  if (_paneLoaded[name]) return;
+  _paneLoaded[name] = true;
+  if (name === 'env') loadEnv();
 }
 
 loadStatus();

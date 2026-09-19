@@ -283,8 +283,8 @@ for k in ("任务导出 / 导入", "doExport", "inspectPack", "doImport"):
 import re as _re  # noqa: E402
 _nav = _re.findall(r'settings-nav-item[^>]*data-pane="(\w+)"', html)
 _panes = _re.findall(r'settings-pane[^>]*data-pane="(\w+)"', html)
-check("9.3 左侧导航 5 个分页",
-      _nav == ["update", "notify", "captcha", "transfer", "backup"], _nav)
+check("9.3 左侧导航分页齐全", _nav == [
+    "update", "notify", "captcha", "transfer", "backup", "env"], _nav)
 check("9.4 导航与面板一一对应", _nav == _panes, _panes)
 check("9.5 含分页切换函数", "showSettingsPane" in html
       and "initSettingsNav" in html)
@@ -292,6 +292,8 @@ check("9.6 默认激活的是程序更新页",
       'settings-pane active" data-pane="update"' in html)
 check("9.7 div 标签配平",
       len(_re.findall(r"<div\b", html)) == len(_re.findall(r"</div>", html)))
+# 9.8 环境信息页（数据落点诊断）
+check("9.8 含环境信息分页", 'data-pane="env"' in html and "loadEnv" in html)
 
 print()
 print("10. 空库导出 / 空包导入")

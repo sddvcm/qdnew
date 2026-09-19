@@ -833,7 +833,100 @@ python packaging/fnos/build_with_fnpack.py
 > 它只能哈希"当前这台机器"的文件，容易忘记先改 version.json，
 > 而且 fpk 装机后代码目录是只读快照。发版统一走上面的命令行流程。
 
-### 16.6 `docker-compose.yml` 的代码挂载
+### 16.6 飞牛 fpk 的数据目录（data-share）
+
+> 官方文档：
+> - 资源声明 <https://developer.fnnas.com/docs/core-concepts/resource/>
+> - 环境变量 <https://developer.fnnas.com/docs/core-concepts/environment-variables/>
+> - 应用框架 <https://developer.fnnas.com/docs/core-concepts/framework/>
+> - 开放 API <https://developer.fnnas.com/api/calling/>
+
+**目标**：数据（数据库/备份/插件/导出文件）放用户能在「文件管理」里直接找到的地方。
+
+#### 正确做法：声明 data-share，让系统建目录
+
+```json
+// packaging/fnos/config/resource
+{
+  "data-share": { "shares": [{ "name": "checkin-system" }] },
+  "api-scope": ["trim.system.getPlatformConfig"]
+}
+```
+
+安装时 fnOS **自动创建**该共享目录，用 **Windows ACL**（不是 POSIX ACL）权限模型，
+并自动给应用运行用户授权。`api-scope` 按官方要求**只声明真正用到的**。
+
+#### 路径有两个官方取径 —— 必须都探
+
+| 取径 | 形式 | 特点 |
+|---|---|---|
+| 官方软链 | `/var/apps/<app>/share/<子目录>`（文档原文） | 文件系统层，**任何时候都在** |
+| 环境变量 | `TRIM_DATA_SHARE_PATHS`（`:` 分隔多路径） | 由系统注入**生命周期脚本**的环境 |
+
+⚠️ **只认环境变量会出错**：它由系统注入到生命周期脚本的环境里，常驻进程
+（以及某些版本下的 `start` 分支）不一定继承得到 → 探测落空 → 数据无声地退回
+私有目录，用户在文件管理里又找不到了。所以 `ensure_data_dir()` 的候选顺序是：
+
+```
+软链（两种拼写都试） → TRIM_DATA_SHARE_PATHS → 私有 @appdata（兜底）
+```
+
+软链优先是因为它由文件系统保证，不依赖环境变量注入。取到软链后要
+`readlink -f` 拿真实路径，否则同一份数据会有两种写法、迁移判断出错。
+
+#### ★ 判定"目录可用"必须实际写一下
+
+`[ -d ]` 不够 —— 目录可能存在但只读挂载、或 ACL 未授权。`ensure_data_dir()`
+**实际写一个探针文件**来判定，两个候选都不行才退回私有目录。
+
+**核心原则：宁可数据放私有目录，也不能让应用起不来。**
+
+#### 迁移老数据
+
+`migrate_legacy_data()` 在 `start` / `install_callback` / `upgrade_callback` 里都会调用，
+对已装老版本的机器，升级后首次启动即完成搬家（幂等、不覆盖已有新数据）。
+
+两个踩过的坑：
+
+1. `mv src dst` 当 `dst` **存在**时会把 `src` 塞进 `dst` 里（变成 `dst/src`），不是合并。
+   → 目标为空时要先 `rmdir` 再 `mv`。
+2. `ensure_dirs` 预建的空脚手架目录（如 `$DATA_DIR/backups`）会让"目标非空就跳过"
+   的判断永远命中 → 迁移被无声跳过。→ **空目标必须当"不存在"处理**。
+
+#### ★ 1.5.7 的失败教训（别重犯）
+
+早期版本自己拼 `/vol1/@appshare/<app>` 并 `mkdir`，三重错误：
+
+1. 用户安装的应用**没有建共享目录的权限**，mkdir 必然失败
+2. 即使建出来也**没有 ACL 授权**，应用写不进去
+3. 于是 `CHECKIN_DATA_DIR` 指向不可写目录 → `database.init_db()` 的 `makedirs`
+   抛异常 → **进程启动即退出**，用户只看到"启动失败"毫无头绪
+
+修法：走官方机制 + 可写性探测兜底 + `init_db` 的 `makedirs` 加 `try`。
+
+#### 诊断入口
+
+`app/fnos.py` 封装平台探测（**所有探测都不抛异常**，读不到就如实回报原因）：
+
+| 函数 | 说明 |
+|---|---|
+| `data_dir()` / `data_dir_source()` | 数据落点与来源（`cmd/main` 注入 `CHECKIN_DATA_DIR_SRC`） |
+| `share_links()` / `share_root()` | 共享目录两个取径 |
+| `writable(path)` | 真实可写性（写探针） |
+| `is_fnpack()` | 是否 fpk 环境 |
+| `platform_config()` | 经**官方开放 API** 读系统语言/版本 |
+
+设置页「环境信息」分页（`GET /api/system/env`）把它们展示出来，一眼看清
+数据存哪了、共享目录通不通。
+
+#### 官方开放 API 的两个要点
+
+1. **只能走 Unix socket**：`/var/run/trim_open_gateway_apiscope.socket`，
+   `POST http://localhost/api/v1/trimapp`。官方明确"不要在前端浏览器里直接调用"。
+2. **token 从 `TRIM_API_TOKEN` 现读**，**不持久化、不落盘、不下发前端**
+   （系统重新注册/重装后会更新）。每次调用时现取。
+
+### 16.7 `docker-compose.yml` 的代码挂载
 
 ```yaml
 volumes:
@@ -843,7 +936,7 @@ volumes:
 这是「更新后不用重新部署」的**前提**。依赖装在 site-packages 不在 `/app`，
 所以挂载不会覆盖已安装依赖；但**改了 requirements.txt 仍需重建镜像**。
 
-### 16.7 新增/改动的文件
+### 16.8 新增/改动的文件
 
 | 文件 | 说明 |
 |---|---|
@@ -860,7 +953,7 @@ volumes:
 | `packaging/fnos/build_captcha_pack.py` | 新增（v1.4.0）。构建本地识别组件包 |
 | `packaging/fnos/make_runtime_tgz.py` | 改动（v1.3.0）。ELF strip + 裁剪，771MB→113MB |
 
-### 16.8 测试
+### 16.9 测试
 
 ```bash
 python __har_test/selftest.py         # 57 项：har 渲染/执行
