@@ -79,6 +79,12 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 20px 22px;
+  /* ⚠️ 稳定最小高度（用户实测：切换分页时整卡上下位置不一致）。
+     各分页内容长度差很大 —— 程序更新/验证码识别/任务导出/环境信息内容多，
+     通知推送/历史备份内容少。没有这个最小高度时，矮分页会让右侧内容区
+     大幅收缩，卡片底边位置忽高忽低，配合居中布局看着像"整卡在跳"。
+     给一个 62vh 的下限，让短分页也撑到接近的高度，切换时视觉基线稳定。 */
+  min-height: 62vh;
 }
 /* 分页面板：默认隐藏，激活时显示 */
 .settings-pane { display: none; }

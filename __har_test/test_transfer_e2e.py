@@ -316,6 +316,13 @@ check("9A.4 旧的渠道 chip 内联样式已移除（padding:3px 0 那版）",
       'gap:6px; padding:3px 0;' not in _check_html)
 check("9A.5 CSS 预留滚动条槽位（分页切换时布局不左右晃）",
       "scrollbar-gutter: stable" in _css)
+check("9A.6 内容区有稳定最小高度（分页切换时不上下跳）",
+      "min-height: 62vh" in _css)
+# 静态资源带版本参数 —— 否则更新后浏览器仍用缓存旧 CSS，
+# 用户会以为改动没生效（实测踩过）
+check("9A.7 静态资源带版本参数（防浏览器缓存旧样式）",
+      bool(_re.search(r"app\.css\?v=[\d.]+", html))
+      and bool(_re.search(r"app\.js\?v=[\d.]+", html)))
 
 print()
 print("10. 空库导出 / 空包导入")

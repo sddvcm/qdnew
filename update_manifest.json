@@ -1,8 +1,8 @@
 {
   "name": "checkin-system",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "released_at": "2026-09-19",
-  "notes": "修复设置页切换分页时整体左右晃动：长内容出现滚动条、短内容消失导致居中布局平移，现始终预留滚动条槽位，导航位置固定",
+  "notes": "修复设置页切换分页时内容区上下跳动（给内容区稳定最小高度）；静态资源加版本参数，解决更新后浏览器沿用缓存旧样式导致「改了没生效」的问题",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "3be5458f97c1874ce3c7a20330adb15d7660bf42d40fdc39460c55920492a10e",
@@ -10,7 +10,7 @@
     "app/extras.py": "cfd2b9c9ced273f2bdfdd684d6289d349079c26ebcc861de01ac28cc0ebb3c4d",
     "app/fnos.py": "4f4fb34c604186366edba9136a17381f9bb3d03dda3f1b0b435b04b770078f79",
     "app/logsetup.py": "c3a9ac04537706c46adb0f73a48403ba66d4599a8f7e657681340e81902cef54",
-    "app/main.py": "0f3fc1043b2b5a159dd08a4544ca98ca9ce41bb0515d38c7798fc41b0be8ba6f",
+    "app/main.py": "bc4ca300a071fc8e3bffdb5ee74dbe80ed29efdc085a5a32a50865191c09fbe7",
     "app/models.py": "995e59e017753f5f27d4efc4d4063f56d7c5f258121e86ebd48929d29263ef3f",
     "app/notifier.py": "183d8d0306692427c6616b5fedacca340b9fa791445028effa02a8874df1fa71",
     "app/plugin_loader.py": "18f21609ec7c7ee8e80b2ec9d7f3ded28a903c37ecceb96e08dabc75c7195264",
@@ -26,7 +26,7 @@
     "app/routes/transfer_api.py": "6242bd446d99de85f0b38df728f57ed1e747794c7895d38ab50d2587a307fe5c",
     "app/routes/update_api.py": "c0525ea3c7991cec81d4b97f45e3ac34731d96007000183a9ff2c8a5279fc8b2",
     "app/routes/__init__.py": "2231d15749360cdc2f16b10779b9ac5e206f9884c4f274149ec474ee1f6d5645",
-    "app/static/css/app.css": "f2f55b14c055e227bb7634275ce7e2021bb6a33bb0b48b83d08d0b055eb5fdda",
+    "app/static/css/app.css": "153da8e56ed88be169383c5c954cbec3b832b14dbd8e525e1d70f19a67ee4d99",
     "app/static/js/app.js": "f24035819e06961c487a1df0bc2712f5fe02d4aeab1f04008557d1a65478c439",
     "docs/DEPLOY-FNOS.md": "5821bf5a21d62544caf8c4bfc10abbb2ecdb07050ed5660c5c75b95534cc8328",
     "docs/hyperdown-handoff.md": "d9e983d0a2eed7e147c72d0f4225f31f41c9c1043b48d4c067a72cfcfd95af02",
@@ -42,7 +42,7 @@
     "plugins/hyperdown.py": "014c89c8723dbd1b8220bf5e0d99f19fc7ebeea6be57f096064ebdd7f395f7b5",
     "plugins/_template.py": "469311361f0d6bcd92c66dd9e6425d72a9f7b2dd06c96ac23ed4489a24e9491f",
     "plugins/__init__.py": "182694fb5e016f78f31c1e0a52c512b47cbce2d17ea67dd962be874e114956db",
-    "templates/base.html": "b5fc384f8a8b6333b08f143c81b516f61aa188df95b9fe2acc86c33b1c9ff5be",
+    "templates/base.html": "0ad531ba477bd9fc4999d792d7871e9304ad4dee265c5e34afe52e7e0535c1ae",
     "templates/detail.html": "7b40dfc1ea6f46aa51d096e576b34ea982d9d12aaee70ed920b245c164003b98",
     "templates/har_editor.html": "f7d9b935d8ae77ee392314f40fa220025e9b7798037c384c24c5079dcc3386c8",
     "templates/har_list.html": "45a10c0a1a40a149c66c58b7afc7ea0d813710f4259c1a64142537d31a2aecaf",
@@ -57,6 +57,6 @@
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
     "updater.py": "b89a8fa97fba4ae8f0ede81e5d6301d19817932ed2423d6d65b1d30d69bf613b",
-    "version.json": "73e5cb723f79e6e10d46607c540d3fc40dbf9f1467dbfc922282d8225eb4144b"
+    "version.json": "c7f457ccc38fac79bf855e8a64c26541f8940a2a143d6f5959b92ecd4190aa7a"
   }
 }

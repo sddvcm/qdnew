@@ -21,6 +21,7 @@ from app.database import init_db
 from app.plugin_loader import load_all_plugins
 from app.scheduler import start, load_all_tasks, shutdown
 import atexit
+import updater                       # 读版本号（静态资源缓存破除用）
 
 log = logging.getLogger("app")
 
@@ -77,6 +78,20 @@ def create_app():
     app.register_blueprint(update_api.bp)
     app.register_blueprint(extras_api.bp, url_prefix="/api/extras")
     app.register_blueprint(transfer_api.bp, url_prefix="/api/transfer")
+
+    # 给所有模板注入版本号，用于静态资源加 ?v= 打破浏览器缓存。
+    # ⚠️ 为什么必须有：之前 base.html 写死 `/static/css/app.css` 无版本参数，
+    #    而 SEND_FILE_MAX_AGE_DEFAULT=3600（缓存 1 小时）—— 更新后浏览器
+    #    仍用缓存里的旧 CSS，用户看到"样式改了却没生效"（实测踩过：
+    #    scrollbar-gutter、checkbox 宽度回退都没生效，用户以为改动没做）。
+    #    带上版本号后，每次发版 URL 变化，缓存自然失效。
+    @app.context_processor
+    def inject_app_version():
+        try:
+            v = updater.current_version().get("version", "0")
+        except Exception:                       # noqa: BLE001
+            v = "0"
+        return {"app_version": v}
 
     @app.errorhandler(404)
     def not_found(e):
