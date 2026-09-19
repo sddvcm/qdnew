@@ -75,6 +75,79 @@
     <button class="btn btn-primary btn-sm" onclick="openNotifyModal()">+ 新增通知渠道</button>
   </div>
 
+  <div class="section-title" style="margin-top: 26px;">本地验证码识别</div>
+  <div class="help-text" style="margin-bottom: 10px;">
+    安装包默认<strong>不含</strong>本地识别所需的库（ddddocr + OpenCV + ONNX，约 400MB），
+    验证码走云码。想用本地识别（免费、不联网、无额度限制）就在这里上传组件包开通，
+    之后可在下方切换识别方式。
+  </div>
+
+  <div id="extrasStatus" style="padding: 12px; border-radius: var(--radius);
+       background: var(--bg-secondary, #f8fafc); font-size: 13px; margin-bottom: 12px;">
+    读取中…
+  </div>
+
+  <div class="form-group">
+    <label>识别方式（全局默认）</label>
+    <select id="captchaBackend" onchange="onBackendChange()">
+      <option value="cloud">云码 jfbym（按次计费，开箱可用）</option>
+      <option value="local">仅本地识别（免费，需先安装组件）</option>
+      <option value="auto">本地优先，失败转云码</option>
+    </select>
+    <div class="help-text">
+      任务里的「验证码识别方式」留空时用这里的设置；任务里单独选了则以任务为准。<br>
+      <strong>auto</strong> 会先用本地识别（省钱），本地不可用或失败时自动改用云码。
+    </div>
+  </div>
+
+  <div class="form-group" id="cloudConfBox">
+    <label>云码 Token（全局，选填）</label>
+    <input type="password" id="cloudToken" placeholder="任务里没填时用这个">
+    <div class="help-text">
+      去 <a href="https://www.jfbym.com" target="_blank" rel="noopener">www.jfbym.com</a>
+      注册，用户中心复制 Token。填这里可以让所有任务共用一个 Token，不用每个任务填一遍。
+    </div>
+  </div>
+
+  <div class="form-group" id="cloudTypeBox">
+    <label>云码识别类型（选填）</label>
+    <input type="text" id="cloudType" placeholder="10110" style="width: 140px;">
+    <div class="help-text">默认 10110 = 通用数英（≤5 位），Discuz 登录验证码用这个即可。</div>
+  </div>
+
+  <div class="modal-actions" style="justify-content: flex-start; gap: 8px; flex-wrap: wrap;">
+    <button class="btn btn-primary" id="saveCaptchaCfgBtn" onclick="saveCaptchaCfg()">
+      保存识别设置</button>
+    <button class="btn" id="testLocalBtn" onclick="testLocalCaptcha()">测试本地识别</button>
+    <span id="extrasMsg" style="font-size: 12px; color: var(--text-muted);"></span>
+  </div>
+
+  <div class="form-group" style="margin-top: 16px;">
+    <label>上传本地识别组件包</label>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <input type="file" id="extrasFile" accept=".zip"
+             style="font-size: 12px; flex: 1; min-width: 200px;">
+      <button class="btn btn-primary btn-sm" id="uploadExtrasBtn"
+              onclick="uploadExtras()">上传并安装</button>
+      <button class="btn btn-sm btn-danger" id="uninstallExtrasBtn"
+              onclick="uninstallExtras()">卸载组件</button>
+    </div>
+    <div class="help-text" id="extrasUploadHint">
+      选择 <code>captcha-local-pack-*.zip</code> 组件包（约 130MB，走内网传输即可）。
+      安装后自动启用，无需重启。组件包存在数据目录里，<strong>升级程序不会丢</strong>。
+    </div>
+  </div>
+
+  <div id="extrasProgress" style="display: none; margin-top: 10px;">
+    <div style="height: 6px; background: var(--border-light, #e5e7eb);
+                border-radius: 3px; overflow: hidden;">
+      <div id="extrasBar" style="height: 100%; width: 0%; background: var(--primary);
+                transition: width .2s;"></div>
+    </div>
+    <div id="extrasProgText" style="font-size: 12px; color: var(--text-muted);
+         margin-top: 4px;">准备中…</div>
+  </div>
+
   <div class="section-title" style="margin-top: 26px;">历史备份</div>
   <div id="backupList" style="font-size: 12px; color: var(--text-secondary);">读取中…</div>
 </div>
@@ -459,8 +532,225 @@ async function testNotify(id) {
   }
 }
 
+// ==================== 本地验证码识别组件 ====================
+let extrasCache = null;
+
+async function loadExtras() {
+  const box = document.getElementById('extrasStatus');
+  try {
+    const r = await fetch('/api/extras/status');
+    const d = await r.json();
+    extrasCache = d.pack || null;
+  } catch(e) {
+    box.textContent = '读取状态失败：' + e.message;
+    return;
+  }
+  const p = extrasCache || {};
+  const cfg = p.config || {};
+
+  // 回填识别设置
+  if (cfg.backend) document.getElementById('captchaBackend').value = cfg.backend;
+  if (cfg.cloud_token) document.getElementById('cloudToken').value = cfg.cloud_token;
+  if (cfg.cloud_type) document.getElementById('cloudType').value = cfg.cloud_type;
+
+  const installed = !!p.installed;
+  const enabled = !!p.enabled;
+  const ok = !!p.runtime_ok;
+
+  let badge, color, bg;
+  if (!installed) {
+    badge = '未安装'; color = '#92400e'; bg = '#fffbeb';
+  } else if (!enabled) {
+    badge = '已安装·未启用'; color = '#92400e'; bg = '#fffbeb';
+  } else if (!ok) {
+    badge = '已安装·依赖异常'; color = '#b91c1c'; bg = '#fef2f2';
+  } else {
+    badge = '已安装·可用'; color = '#15803d'; bg = '#f0fdf4';
+  }
+
+  let detail = '';
+  if (installed) {
+    detail = `<div style="margin-top:6px; line-height:1.9;">
+      组件版本 <code>${esc(p.version || '未知')}</code>
+      ｜ 平台 <code>${esc(p.platform || '未知')}</code>
+      ｜ 大小 <strong>${p.size_mb}MB</strong>
+      ${p.provides && p.provides.length
+          ? '<br>包含：<code>' + esc(p.provides.join(', ')) + '</code>' : ''}
+      ${(p.missing_deps && p.missing_deps.length)
+          ? '<br><span style="color:#b91c1c;">缺少依赖：' +
+            esc(p.missing_deps.join(', ')) + '（请重新上传组件包）</span>' : ''}
+    </div>`;
+  } else {
+    detail = '<div style="margin-top:6px; color:var(--text-muted);">' +
+      '未安装本地识别组件，验证码将使用云码识别。</div>';
+  }
+
+  box.innerHTML = `
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span style="padding:2px 8px; border-radius:10px; font-size:12px;
+                   color:${color}; background:${bg};">${badge}</span>
+      <span style="flex:1;"></span>
+      ${installed ? `<label style="font-weight:400; font-size:12px;
+        display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" ${enabled ? 'checked' : ''}
+          onchange="toggleExtras(this.checked)"> 启用</label>` : ''}
+    </div>${detail}`;
+
+  document.getElementById('uninstallExtrasBtn').disabled = !installed;
+  // 没装组件时不允许把识别方式设成"仅本地"
+  const sel = document.getElementById('captchaBackend');
+  const localOpt = sel.querySelector('option[value="local"]');
+  if (localOpt) localOpt.disabled = !ok;
+  onBackendChange();
+}
+
+function onBackendChange() {
+  // 选了云码/auto 才显示云码配置
+  const v = document.getElementById('captchaBackend').value;
+  const show = (v === 'cloud' || v === 'auto');
+  document.getElementById('cloudConfBox').style.display = show ? '' : 'none';
+  document.getElementById('cloudTypeBox').style.display = show ? '' : 'none';
+}
+
+function extrasMsg(text, kind) {
+  const el = document.getElementById('extrasMsg');
+  el.textContent = text || '';
+  el.style.color = kind === 'error' ? '#b91c1c'
+                 : kind === 'ok' ? '#15803d' : 'var(--text-muted)';
+}
+
+async function toggleExtras(enabled) {
+  try {
+    const r = await fetch('/api/extras/toggle', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({enabled}),
+    });
+    const d = await r.json();
+    if (!d.success) { showToast('error', d.message || '操作失败'); }
+    else { showToast('success', d.message); }
+  } catch(e) {
+    showToast('error', '请求失败：' + e.message);
+  }
+  loadExtras();
+}
+
+async function saveCaptchaCfg() {
+  const body = {
+    backend: document.getElementById('captchaBackend').value,
+    cloud_token: document.getElementById('cloudToken').value.trim(),
+    cloud_type: document.getElementById('cloudType').value.trim(),
+  };
+  const btn = document.getElementById('saveCaptchaCfgBtn');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/extras/settings', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (d.success) showToast('success', d.message || '已保存');
+    else showToast('error', d.message || '保存失败');
+  } catch(e) {
+    showToast('error', '请求失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+  loadExtras();
+}
+
+async function testLocalCaptcha() {
+  const btn = document.getElementById('testLocalBtn');
+  btn.disabled = true;
+  extrasMsg('测试中（首次会加载模型，可能几秒）…');
+  try {
+    const r = await fetch('/api/extras/test-local', {method: 'POST'});
+    const d = await r.json();
+    if (d.success) extrasMsg(d.message, 'ok');
+    else extrasMsg(d.message || '测试失败', 'error');
+  } catch(e) {
+    extrasMsg('测试请求失败：' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function uploadExtras() {
+  const f = document.getElementById('extrasFile').files[0];
+  if (!f) { showToast('error', '请先选择组件包（.zip）'); return; }
+  if (!f.name.toLowerCase().endsWith('.zip')) {
+    showToast('error', '只接受 .zip 组件包'); return;
+  }
+  if (!confirm('确定上传并安装「' + f.name + '」？\n\n' +
+      '文件大小约 ' + (f.size/1024/1024).toFixed(1) + 'MB，' +
+      '安装后会自动启用本地验证码识别。')) return;
+
+  // 用 XHR 而非 fetch：要进度条
+  const xhr = new XMLHttpRequest();
+  const prog = document.getElementById('extrasProgress');
+  const bar = document.getElementById('extrasBar');
+  const txt = document.getElementById('extrasProgText');
+  const btn = document.getElementById('uploadExtrasBtn');
+  prog.style.display = '';
+  btn.disabled = true;
+
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    const pct = Math.round(e.loaded / e.total * 100);
+    bar.style.width = pct + '%';
+    txt.textContent = pct < 100
+      ? `上传中 ${pct}%（${(e.loaded/1024/1024).toFixed(0)}/${(e.total/1024/1024).toFixed(0)}MB）`
+      : '上传完成，正在解压安装…';
+  };
+  xhr.onload = () => {
+    btn.disabled = false;
+    let d = {};
+    try { d = JSON.parse(xhr.responseText || '{}'); } catch(e) {}
+    if (xhr.status === 200 && d.success) {
+      bar.style.width = '100%';
+      txt.textContent = '安装完成';
+      showToast('success', d.message || '安装成功');
+      extrasMsg(d.message || '', 'ok');
+      document.getElementById('extrasFile').value = '';
+    } else {
+      prog.style.display = 'none';
+      showToast('error', d.message || ('安装失败（HTTP ' + xhr.status + '）'));
+      extrasMsg(d.message || '安装失败', 'error');
+    }
+    loadExtras();
+  };
+  xhr.onerror = () => {
+    btn.disabled = false;
+    prog.style.display = 'none';
+    showToast('error', '上传失败（网络中断或文件过大）');
+    loadExtras();
+  };
+  xhr.open('POST', '/api/extras/upload');
+  const fd = new FormData();
+  fd.append('file', f);
+  xhr.send(fd);
+}
+
+async function uninstallExtras() {
+  if (!confirm('确定卸载本地识别组件？\n\n会删除已上传的组件（约 400MB）。\n' +
+      '之后再想用本地识别需要重新上传。')) return;
+  const btn = document.getElementById('uninstallExtrasBtn');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/extras/captcha-local', {method: 'DELETE'});
+    const d = await r.json();
+    if (d.success) { showToast('success', d.message || '已卸载'); extrasMsg('', ''); }
+    else showToast('error', d.message || '卸载失败');
+  } catch(e) {
+    showToast('error', '请求失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    loadExtras();
+  }
+}
+
 loadStatus();
 loadNotifies();
+loadExtras();
 {% endraw %}
 </script>
 {% endblock %}

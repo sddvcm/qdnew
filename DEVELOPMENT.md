@@ -589,7 +589,8 @@ from captcha import solve, CaptchaError
 code, used = solve(image_bytes, backend="cloud", token="...", type_id="10110")
 ```
 
-- `backend`：`local`（ddddocr）/ `cloud`（云码）/ `auto`（本地优先，失败转云码）
+- `backend`：`local`（本地）/ `cloud`（云码）/ `auto`（本地优先，失败转云码）/
+  **空串 `""` = 跟随系统设置的全局默认**（推荐，见 §16.3）
 - **ddddocr 懒加载 + 单例缓存**：不要改回顶层 import（会拉起 onnxruntime 几百 MB，
   而多数任务用 Cookie 直连根本不需要验证码）。单例是为了避免每次识别重新初始化模型。
 - 云码 API（2026-09 核对官方文档）：
@@ -602,11 +603,80 @@ code, used = solve(image_bytes, backend="cloud", token="...", type_id="10110")
 - 参数类错误（Token 错、余额不足、类型不支持）**不重试** —— 重试只是浪费钱和时间，
   直接上抛让用户去改配置。
 - `data` 字段兼容 dict 与 list 两种返回形态。
+- **异常必须 catch 宽**：`_get_local_ocr()` 里 import ddddocr 只 catch `ImportError`
+  是不够的 —— 组件包装了但跑不起来（缺 .so、模型不全、onnx 版本不匹配）会抛
+  `AttributeError` / `OSError` 等，必须一并翻译成人话，否则任务直接崩。
 
-插件侧（fuliba）新增 3 个表单字段：`ocr_backend` / `jfbym_token` / `jfbym_type`，
+插件侧（fuliba）有 3 个表单字段：`ocr_backend` / `jfbym_token` / `jfbym_type`，
 `_solve_captcha(session, cap, ocr_conf)` 多接一个配置参数。
+**三者的默认值都是空**，表示"跟随系统设置的全局配置"，插件不必重复配一遍。
+`jfbym_token` / `jfbym_type` 为空时由 `captcha.solve()` 自动回退全局值。
 
-### 16.3 程序内自动更新（updater.py）
+### 16.3 可选组件：本地验证码识别包（app/extras.py）
+
+**为什么有这个东西**：主安装包从 314MB 砍到 37MB，代价是把本地识别依赖
+（ddddocr + OpenCV + ONNX + NumPy，解包约 390MB）从包里拿掉了。为了不牺牲功能，
+把它做成**按需上传的可选组件**。
+
+**目录约定（关键设计）**
+
+```
+<CHECKIN_DATA_DIR>/extras/captcha-local/
+    site-packages/          ← 组件内容，会被 insert(0) 进 sys.path
+    installed_manifest.json ← 安装时存入的 manifest
+    .enabled                ← 存在=启用
+```
+
+放在**数据目录**里是故意的：fpk 模式下 `CHECKIN_DATA_DIR=$TRIM_PKGVAR`（@appdata），
+**升级/重装应用不会丢**，用户不必每次升级都重传 390MB。
+
+**启动时注入**：`create_app()` 里在 `load_all_plugins()` **之前**调
+`extras.apply_all()`，否则插件 import captcha 时找不到用户上传的库。
+顺序错了插件会 import 失败。
+
+**captcha 侧配合**：`captcha._ensure_local_importable()` 每次本地识别前调
+`extras.apply_to_syspath()`，保证独立脚本/新进程也能找到组件。
+
+**接口**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/extras/status` | 组件状态 + 全局识别设置 |
+| POST | `/api/extras/upload` | 上传组件包（multipart `file`，或 JSON base64） |
+| POST | `/api/extras/toggle` | 启用/停用 `{"enabled":bool}` |
+| DELETE | `/api/extras/captcha-local` | 卸载 |
+| POST | `/api/extras/settings` | 保存全局识别方式 / 云码 Token |
+| POST | `/api/extras/test-local` | 用内置测试图验证本地识别真能跑 |
+
+**⚠️ 安全模型（必读）**
+
+这个功能允许上传并 import 任意 Python 包，等价于**远程代码执行**能力。
+已做的限制：
+
+1. 只收 zip，且必须含 `manifest.json` 且 `name == "captcha-local"`
+2. **防 zip slip**：拒绝 `..` / 绝对路径 / 盘符 / 反斜杠穿越的成员，
+   解压后又用 `realpath` 二次确认落在目标目录内
+3. 只解压到 `extras/` 下，不碰代码目录
+4. 大小上限（zip 800MB / 解压后 2GB）
+5. 必须先安装才能启用；未装时不允许把识别方式设成"仅本地"
+
+⚠️ 知情即可：这些**防不住用户自己上传恶意包**（那是他自己的机器，本就有此权限）。
+真正的信任边界是"谁能访问这个 Web 后台"。
+
+**组件包格式**
+
+```
+captcha-local-pack-1.0.zip
+  manifest.json      {"name":"captcha-local","version":"1.0","python":"3.12",
+                      "platform":"linux_x86_64","provides":["ddddocr","cv2",...]}
+  site-packages/     ddddocr/ cv2/ onnxruntime/ numpy/ ...
+```
+
+**构建**：`python packaging/fnos/build_captcha_pack.py 1.0`
+（复用 `build/wheels/` 里已下好的 manylinux wheel，解压即用、不做二进制改动）
+产物落在 `packaging/fnos/dist/captcha-local-pack-<ver>.zip`（约 130MB）。
+
+### 16.4 程序内自动更新（updater.py）
 
 **目标**：Web 上点一下就能升级，不用重新部署。
 
@@ -682,16 +752,27 @@ volumes:
 | `templates/settings.html` | 新增。系统设置页 |
 | `plugins/fuliba.py` | 改动。验证码识别接 captcha.py，新增 3 个表单字段 |
 | `app/engine.py` | 改动。把通知失败原因写进任务日志 |
+| `app/extras.py` | 新增（v1.4.0）。可选组件管理：安装/卸载/启停/注入 sys.path |
+| `app/routes/extras_api.py` | 新增（v1.4.0）。`/api/extras/*` 接口 |
+| `packaging/fnos/build_captcha_pack.py` | 新增（v1.4.0）。构建本地识别组件包 |
+| `packaging/fnos/make_runtime_tgz.py` | 改动（v1.3.0）。ELF strip + 裁剪，771MB→113MB |
 
-### 16.6 测试
+### 16.7 测试
 
 ```bash
-python __har_test/test_features.py    # 80 项：PushPlus / 云码 / 更新安全闸
+python __har_test/selftest.py         # 57 项：har 渲染/执行
+python __har_test/integration.py      # 41 项：har 端到端（mock HTTP）
+python __har_test/test_features.py    # 85 项：PushPlus / 云码 / 更新安全闸
+python __har_test/test_extras.py      # 38 项：可选组件安装/校验/穿越防护/启停/卸载
 ```
 
 其中更新部分重点覆盖**攻击面**：目录穿越、绝对路径、`.env`/`data/`/`user_plugins/`
 越权、非白名单扩展名、伪造域名（`raw.githubusercontent.com.evil.com`、
 `github.com@evil.com`）、哈希不匹配时原文件必须零改动。
+
+`test_extras.py` 重点覆盖**组件包的恶意/畸形输入**：非 zip、缺 manifest、
+name 不符、zip slip 路径穿越、空 site-packages，以及"重复安装要清掉旧文件"
+（否则新旧库混在一起会出诡异 bug）。
 
 ---
 

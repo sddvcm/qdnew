@@ -254,10 +254,19 @@ try:
     code, used = cap_mod.solve(PNG, backend="cloud", token="tok")
     check("2.14 solve() cloud 后端", code == "QQ99" and used == "cloud", (code, used))
 
-    # 2.15 solve() 不认识的 backend 回退 local（不炸）
-    check("2.15 未知后端不抛未知异常",
-          cap_mod.describe_backend("weird") == "本地 ddddocr",
-          cap_mod.describe_backend("weird"))
+    # 2.15 solve()/describe_backend 对不认识的 backend：回退「系统设置的全局默认」
+    #      （v1.4.0 起主包不内置本地识别，全局默认是 cloud；回退目标不再是写死的 local）
+    desc = cap_mod.describe_backend("weird")
+    check("2.15 未知后端回退全局默认（不炸）",
+          desc in ("云码云端识别", "本地识别", "本地优先(失败转云码)",
+                   "本地优先(未配云码Token)"),
+          desc)
+    # 2.16 空 backend 也表示「跟随系统设置」
+    check("2.16 空后端回退全局默认",
+          cap_mod.describe_backend("") in ("云码云端识别", "本地识别",
+                                           "本地优先(失败转云码)",
+                                           "本地优先(未配云码Token)"),
+          cap_mod.describe_backend(""))
 
 finally:
     requests.post = orig_post

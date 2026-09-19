@@ -65,6 +65,81 @@ class CaptchaError(Exception):
 # ============================ 本地 ddddocr ============================
 
 _ocr_instance = None
+# 记录单例是从哪个组件目录加载的。组件被停用/卸载后要据此作废单例 ——
+# 否则旧对象还在内存里，用户点完卸载仍会"识别成功"，这是错的。
+_ocr_from_path = None
+
+
+def reset_local_ocr():
+    """作废本地识别单例（组件停用/卸载时由 extras 调用）。"""
+    global _ocr_instance, _ocr_from_path
+    _ocr_instance = None
+    _ocr_from_path = None
+
+
+def _invalidate_if_stale():
+    """单例若来自"已停用/已卸载"的组件目录，就把它作废。
+
+    为什么需要：`_ocr_instance` 是模块级缓存，组件被卸载后它还在内存里，
+    `solve_local()` 会继续用旧对象"识别成功" —— 用户以为卸载生效了其实没有。
+    extras 侧卸载时会清 sys.modules，但那是另一模块的状态；这里再自检一次，
+    保证 `captcha` 自己不认识过期单例。
+    """
+    global _ocr_instance, _ocr_from_path
+    if _ocr_instance is None:
+        return
+    try:
+        from app import extras
+    except Exception:                  # noqa: BLE001 —— 独立脚本/无组件系统
+        return
+    try:
+        if extras.is_enabled():
+            return
+        # 组件已停用 → 单例必然过期
+        reset_local_ocr()
+    except Exception:                  # noqa: BLE001
+        pass
+
+
+def _ensure_local_importable():
+    """确保本地识别所需的库可被 import。
+
+    本地识别依赖（ddddocr/opencv/onnxruntime/numpy）约 390MB，**默认不在安装包里**，
+    而是作为可选组件由用户在「系统设置 → 本地验证码识别」上传安装。那些库会被
+    解到 <数据目录>/extras/captcha-local/site-packages，这里负责把它挂进 sys.path。
+
+    这样 ddddocr 的 import 才能找到它 —— 否则无论怎么装都会 ModuleNotFoundError。
+    """
+    try:
+        from app import extras        # 不放在顶部 import：captcha.py 也可能被独立脚本用
+        extras.apply_to_syspath()
+    except Exception:                 # noqa: BLE001 —— 组件系统不可用不该拖垮识别流程
+        pass
+
+
+def local_available() -> bool:
+    """本地识别是否真的可用（用于给用户准确的提示，而不是等 import 失败）
+
+    ⚠️ 只看"能不能 import 到 ddddocr"，**不构造 DdddOcr 实例** ——
+    构造会加载 onnx 模型，慢且吃内存，不该在状态查询里做。
+    真正能不能跑由「测试本地识别」按钮验证。
+
+    ⚠️ 还要确认"组件当前是启用的"：单看 import 成功会误报 —— 用户可能刚点了
+    停用/卸载，而 Python 已经把 ddddocr 缓存进 sys.modules 了。extras 侧
+    会清理缓存，这里再核对一次状态，双保险。
+    """
+    _ensure_local_importable()
+    try:
+        from app import extras
+        if not extras.is_enabled():
+            return False
+    except Exception:                  # noqa: BLE001 —— 独立脚本场景没有 extras，放行
+        pass
+    try:
+        import ddddocr                 # noqa: F401
+        return True
+    except Exception:                  # noqa: BLE001
+        return False
 
 
 def _get_local_ocr():
@@ -73,17 +148,43 @@ def _get_local_ocr():
     ⚠️ 不要改成模块顶层 `import ddddocr`：它会拉起 onnxruntime，加载几百 MB
     模型，而绝大多数任务用的是 Cookie 直连、根本不需要验证码识别。
     这里做单例缓存，是为了避免每次识别都重新初始化模型（很慢）。
+
+    ⚠️ 异常处理要宽：组件包没装会 ImportError，但**装了却跑不起来**（缺 .so、
+    模型文件不全、onnxruntime 版本不匹配）会在 import 或构造实例时抛
+    ModuleNotFoundError/AttributeError/OSError 等各种异常。这些都该翻译成
+    一句人话，而不是把原始 traceback 甩给用户 —— 所以这里 catch Exception。
     """
-    global _ocr_instance
+    global _ocr_instance, _ocr_from_path
+    _ensure_local_importable()
+
+    # 组件被停用/卸载后，之前缓存的单例必须作废 —— 否则旧对象还在内存里，
+    # 用户点完卸载仍会"识别成功"（实测踩过）。
+    _invalidate_if_stale()
+
     if _ocr_instance is None:
         try:
             import ddddocr
         except ImportError as exc:
             raise CaptchaError(
-                "未安装 ddddocr，无法本地识别验证码。"
-                "可在任务里改用云码（填云码 Token），或重建镜像安装 ddddocr"
+                "未安装本地识别组件（ddddocr）。请到「系统设置 → 本地验证码识别」"
+                "上传组件包并启用，或把验证码识别方式改为云码（填云码 Token）。"
             ) from exc
-        _ocr_instance = ddddocr.DdddOcr(show_ad=False)
+        except Exception as exc:            # noqa: BLE001
+            raise CaptchaError(f"加载 ddddocr 失败（组件包可能不完整）：{exc}") from exc
+
+        try:
+            _ocr_instance = ddddocr.DdddOcr(show_ad=False)
+            _ocr_from_path = getattr(ddddocr, "__file__", "") or ""
+        except AttributeError as exc:
+            raise CaptchaError(
+                "ddddocr 模块结构异常（缺少 DdddOcr）。组件包可能不完整或版本不对，"
+                "建议重新上传「本地识别组件包」。"
+            ) from exc
+        except Exception as exc:            # noqa: BLE001 —— onnxruntime 加载失败等
+            raise CaptchaError(
+                f"初始化本地识别模型失败：{exc}\n"
+                "常见原因：onnxruntime 缺少系统库，或组件包与当前 Python 版本不匹配。"
+            ) from exc
     return _ocr_instance
 
 
@@ -177,15 +278,52 @@ def solve_cloud(image_bytes: bytes, token: str, type_id: str = JFBYM_DEFAULT_TYP
 
 # ============================ 统一入口 ============================
 
+def get_default_backend() -> str:
+    """读全局默认识别方式（系统设置里配的），读不到就返回 'cloud'。
+
+    为什么默认 cloud：主包**不内置**本地识别依赖，所以开箱只有 cloud 可用。
+    用户在设置页装了本地组件后，可以把它切成 local/auto。
+    """
+    try:
+        from app.database import get_db
+        db = get_db()
+        row = db.execute(
+            "SELECT value FROM system_config WHERE key='captcha_backend'"
+        ).fetchone()
+        db.close()
+        val = (row["value"] if row else "") or ""
+        return val.strip().lower() or "cloud"
+    except Exception:                  # noqa: BLE001 —— 独立脚本/无库时不该崩
+        return "cloud"
+
+
+def get_default_cloud_conf() -> Tuple[str, str]:
+    """读全局云码配置 (token, type_id)，供任务未填时兜底"""
+    try:
+        from app.database import get_db
+        db = get_db()
+        rows = db.execute(
+            "SELECT key, value FROM system_config "
+            "WHERE key IN ('captcha_cloud_token', 'captcha_cloud_type')"
+        ).fetchall()
+        db.close()
+        conf = {r["key"]: r["value"] for r in rows}
+        return (str(conf.get("captcha_cloud_token") or ""),
+                str(conf.get("captcha_cloud_type") or ""))
+    except Exception:                  # noqa: BLE001
+        return ("", "")
+
+
 def solve(image_bytes: bytes, backend: str = "local", token: str = "",
           type_id: str = JFBYM_DEFAULT_TYPE, retries: int = 1) -> Tuple[str, str]:
     """识别验证码，返回 `(识别结果, 使用的后端)`。
 
     Args:
         backend: "local"（ddddocr）/ "cloud"（云码）/ "auto"（先本地，失败或
-                 结果可疑时改用云端 —— 云端要 token 才生效）
-        token: 云码 Token（backend 为 cloud/auto 时必填）
-        type_id: 云码打码类型
+                 结果可疑时改用云端 —— 云端要 token 才生效）。
+                 传空字符串表示**用系统设置里的全局默认**。
+        token: 云码 Token（backend 为 cloud/auto 时必填；为空则回退全局配置）
+        type_id: 云码打码类型（为空则回退全局配置）
         retries: 失败重试次数（含首次，所以 1 = 不重试）
 
     Returns:
@@ -194,16 +332,28 @@ def solve(image_bytes: bytes, backend: str = "local", token: str = "",
     Raises:
         CaptchaError: 所有后端都失败
     """
-    backend = (backend or "local").strip().lower()
+    backend = (backend or "").strip().lower()
+    if not backend or backend not in ("local", "cloud", "auto"):
+        backend = get_default_backend()
+
+    # 任务里没填云码信息时，用系统设置里的全局值兜底（少配一遍）
+    if not token or not str(token).strip():
+        g_token, g_type = get_default_cloud_conf()
+        token = token or g_token
+        if not type_id or str(type_id).strip() == JFBYM_DEFAULT_TYPE:
+            type_id = (str(type_id).strip() or "") or g_type or JFBYM_DEFAULT_TYPE
+    token = str(token or "").strip()
+    type_id = str(type_id or "").strip() or JFBYM_DEFAULT_TYPE
+
     attempts = max(1, int(retries or 1))
     last_error: Optional[Exception] = None
 
     order = {
         "local": ["local"],
         "cloud": ["cloud"],
-        # auto：先本地（免费），本地挂了或有 token 时补一次云端
+        # auto：先本地（免费），本地不可用/失败且有 token 时补一次云端
         "auto": ["local", "cloud"] if token else ["local"],
-    }.get(backend, ["local"])
+    }.get(backend, ["cloud"])
 
     for attempt in range(attempts):
         for which in order:
@@ -229,9 +379,11 @@ def solve(image_bytes: bytes, backend: str = "local", token: str = "",
 
 def describe_backend(backend: str, token: str = "") -> str:
     """给日志/通知用的一句话说明"""
-    backend = (backend or "local").lower()
+    backend = (backend or "").strip().lower()
+    if not backend or backend not in ("local", "cloud", "auto"):
+        backend = get_default_backend()
     if backend == "cloud":
         return "云码云端识别"
     if backend == "auto":
-        return "本地优先(失败转云码)" if token else "本地识别(未配云码Token)"
-    return "本地 ddddocr"
+        return "本地优先(失败转云码)" if token else "本地优先(未配云码Token)"
+    return "本地识别"

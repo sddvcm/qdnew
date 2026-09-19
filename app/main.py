@@ -18,13 +18,23 @@ def create_app():
     app.secret_key = os.environ.get("CHECKIN_SECRET_KEY", "checkin-default-key-change-me")
 
     init_db()
+
+    # 可选组件（本地验证码识别包）—— 必须在插件加载前注入 sys.path，
+    # 否则插件 import captcha 时找不到用户上传的 ddddocr 等库。
+    from app import extras
+    try:
+        if extras.apply_all():
+            print("[extras] 已加载本地识别组件包", flush=True)
+    except Exception as e:            # noqa: BLE001 —— 组件坏了不该阻止启动
+        print(f"[extras] 加载组件包失败（忽略）：{e}", flush=True)
+
     load_all_plugins()
     start()
     load_all_tasks()
     atexit.register(shutdown)
 
     from app.routes import (index, task_api, plugin_api, notify_api,
-                            system_api, har_api, update_api)
+                            system_api, har_api, update_api, extras_api)
     app.register_blueprint(index.bp)
     app.register_blueprint(task_api.bp, url_prefix="/api/tasks")
     app.register_blueprint(plugin_api.bp, url_prefix="/api/plugins")
@@ -34,6 +44,7 @@ def create_app():
     # 所以不加 url_prefix
     app.register_blueprint(har_api.bp)
     app.register_blueprint(update_api.bp)
+    app.register_blueprint(extras_api.bp, url_prefix="/api/extras")
 
     @app.errorhandler(404)
     def not_found(e):

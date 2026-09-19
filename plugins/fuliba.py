@@ -401,20 +401,23 @@ class FulibaPlugin(BasePlugin):
         FormField(key="retry", label="重试次数", type="number", required=False,
                   default=3, help_text="登录或签到失败时最多重试几次"),
         FormField(key="ocr_backend", label="验证码识别方式", type="select", required=False,
-                  default="local",
+                  default="",
                   options=[
-                      {"value": "local", "label": "本地 ddddocr（免费，无需配置）"},
-                      {"value": "cloud", "label": "云码 jfbym（更准，按次计费）"},
+                      {"value": "", "label": "跟随系统设置（推荐）"},
+                      {"value": "local", "label": "本地识别（需先安装组件包）"},
+                      {"value": "cloud", "label": "云码 jfbym（按次计费）"},
                       {"value": "auto", "label": "本地优先，失败转云码"},
                   ],
-                  help_text="只有账号密码登录且触发验证码时才会用到；Cookie 直连模式不涉及"),
-        FormField(key="jfbym_token", label="云码 Token", type="password", required=False,
+                  help_text="留空=用「系统设置 → 本地验证码识别」里的全局设置；"
+                            "只有账号密码登录且触发验证码时才用到，Cookie 直连模式不涉及"),
+        FormField(key="jfbym_token", label="云码 Token（选填）", type="password", required=False,
                   sensitive=True,
-                  placeholder="选云码时必填",
-                  help_text="去 www.jfbym.com 注册，用户中心复制 Token"),
-        FormField(key="jfbym_type", label="云码识别类型", type="text", required=False,
-                  default="10110",
-                  placeholder="10110",
+                  placeholder="留空则用系统设置里的全局 Token",
+                  help_text="去 www.jfbym.com 注册，用户中心复制 Token。"
+                            "在系统设置里填过就不必在这里重复填"),
+        FormField(key="jfbym_type", label="云码识别类型（选填）", type="text", required=False,
+                  default="",
+                  placeholder="留空则用 10110",
                   help_text="默认 10110=通用数英(≤5位)，Discuz 登录验证码用这个即可"),
     ]
 
@@ -481,9 +484,9 @@ class FulibaPlugin(BasePlugin):
         username = config.get("username", "")
         password = config.get("password", "")
         retry = int(params.get("retry", 3))
-        # 验证码识别配置：backend=local(ddddocr) / cloud(云码) / auto(本地优先)
+        # 验证码识别配置：backend=local(本地) / cloud(云码) / auto(本地优先) / ""(跟随系统设置)
         ocr_conf = {
-            "backend": params.get("ocr_backend", "local"),
+            "backend": params.get("ocr_backend", "") or "",
             "token": params.get("jfbym_token", "") or "",
             "type": params.get("jfbym_type", "") or "",
         }
