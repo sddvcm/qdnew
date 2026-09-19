@@ -1,8 +1,8 @@
 {
   "name": "checkin-system",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "released_at": "2026-09-19",
-  "notes": "「测试本地识别」改用云码官网的 4 张真实示例验证码（PNG+JPEG），逐张识别并展示结果，可自行对照准确率；上版本测试图损坏导致测试必失败的问题一并修复",
+  "notes": "修复「检查更新」报 403 rate limit exceeded：不再调用 api.github.com 查询默认分支（GitHub 未认证限流 60次/时/出口IP，走代理时共用节点极易被跑满），改为直接用 main、读不到再兜底探测 master（走 raw 域名，不计 API 额度）",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "5f6349210f7fd5be3908ba252eb49a444d277be0b68e002bb1b97bebccf9b1df",
@@ -54,7 +54,7 @@
     "README.md": "7c89f6263d9a8573b5d4dae31fce8f151c1ee36b46fa129b747cc6fdf7e44c66",
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
-    "updater.py": "3be1dbd4746a421593bd98d7014cee2de3ab61d405ca963ae8956cae66e48214",
-    "version.json": "c5e3fc16d466b1d253bcbea59bc5025419ece06a1dac1d4fcff6eeffec33559e"
+    "updater.py": "921c66f5e449fc0f4c22f1bd9eb84d278bc2b118374ad285936cb80862b863e9",
+    "version.json": "76eb2675c0517c1386dc3293c1bda6a3141fc096e293e3d048f89cee5d616528"
   }
 }

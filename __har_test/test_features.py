@@ -360,21 +360,41 @@ for url, ok_expected in [
 
 # 3.9 源地址解析
 for src, exp_owner, exp_repo, exp_branch in [
-    ("https://github.com/user/repo", "user", "repo", None),
-    ("user/repo", "user", "repo", None),
+    ("https://github.com/user/repo", "user", "repo", "main"),
+    ("user/repo", "user", "repo", "main"),
     ("https://github.com/user/repo/tree/dev", "user", "repo", "dev"),
-    ("https://github.com/user/repo.git", "user", "repo", None),
+    ("https://github.com/user/repo.git", "user", "repo", "main"),
 ]:
     try:
-        if exp_branch:
-            # 带分支的会跳过 API 查询
-            r = updater.normalize_source(src)
-            check(f"3.9 解析源 {src}", r["owner"] == exp_owner and r["repo"] == exp_repo
-                  and r["branch"] == exp_branch, r)
-        else:
-            check(f"3.9 解析源 {src} 格式（跳过网络查询）", True)
+        # v1.5.3 起**完全不走网络**：没写分支就直接用 main（不再调 api.github.com）。
+        # 旧实现会去查 default_branch，撞上 GitHub 未认证限流（60/时/出口IP）就 403。
+        r = updater.normalize_source(src)
+        check(f"3.9 解析源 {src} → branch={exp_branch}",
+              r["owner"] == exp_owner and r["repo"] == exp_repo
+              and r["branch"] == exp_branch, r)
     except updater.UpdateError as e:
         check(f"3.9 解析源 {src}", False, str(e))
+
+# 3.9b 关键回归：normalize_source 绝不能发网络请求（限流根因）
+# 用 AST 只取"真正的可执行代码"，自动排除注释与 docstring
+import ast as _ast  # noqa: E402
+import inspect as _insp  # noqa: E402
+_fn = _ast.parse(_insp.getsource(updater.normalize_source)).body[0]
+for _n in _ast.walk(_fn):
+    if isinstance(_n, _ast.Expr) and isinstance(_n.value, _ast.Constant) \
+            and isinstance(_n.value.value, str):
+        _n.value.value = ""            # 清空 docstring
+_code_txt = _ast.unparse(_fn)
+_offend = [t for t in ("requests.", "api.github.com", "urlopen")
+           if t in _code_txt]
+check("3.9b normalize_source 可执行代码里无网络请求（否则撞 API 限流）",
+      not _offend, _offend)
+# 3.9c 猜分支的标记正确（只有用户没写分支时才允许后续兜底探测）
+check("3.9c 未指定分支→branch_guessed=True",
+      updater.normalize_source("user/repo")["branch_guessed"] is True)
+check("3.9d 指定分支→branch_guessed=False",
+      updater.normalize_source("https://github.com/user/repo/tree/dev")
+      ["branch_guessed"] is False)
 
 try:
     updater.normalize_source("")

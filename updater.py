@@ -162,19 +162,33 @@ def _assert_allowed_url(url: str):
         )
 
 
+DEFAULT_BRANCH = "main"
+# 探测默认分支时的候选（按顺序试；命中即用，全失败才报错）
+BRANCH_CANDIDATES = ("main", "master")
+
+
 def normalize_source(source: str, proxy: Optional[str] = None) -> Dict:
-    """把用户填的源地址规范成 {owner, repo, branch, raw_base, api_base}。
+    """把用户填的源地址规范成 {owner, repo, branch, raw_base, web_url}。
 
     支持三种填法：
         https://github.com/owner/repo
         owner/repo
         https://github.com/owner/repo/tree/branch
+
+    ⚠️ 分支解析策略（踩过坑，务必保留这个顺序）：
+    1. URL 里写了 /tree/xxx  → 用它（最可靠，用户说了算）
+    2. 没写 → **直接用 main**，不去问 GitHub API
+    3. 只有当 main 分支的清单读不到时，才**兜底探测** master
+
+    为什么不去调 api.github.com 查 default_branch：
+    GitHub 对未认证请求只给 60 次/小时（**按出口 IP 算**）。用户走代理时
+    出口是共享节点，很容易被别人跑满，于是"检查更新"直接 403 失败 ——
+    而这对功能毫无必要：绝大多数仓库默认分支就是 main，探测 master 也够了。
     """
     source = (source or "").strip()
     if not source:
         raise UpdateError("未配置更新源，请在「系统设置」里填写 GitHub 仓库")
 
-    branch = ""
     m = re.match(r"^(?:https?://github\.com/)?([\w.-]+)/([\w.-]+?)(?:\.git)?"
                  r"(?:/tree/([\w./-]+))?/?$", source)
     if not m:
@@ -183,20 +197,8 @@ def normalize_source(source: str, proxy: Optional[str] = None) -> Dict:
             "（可选 /tree/分支名）"
         )
     owner, repo, branch = m.group(1), m.group(2), (m.group(3) or "").strip("/")
-
     if not branch:
-        # 没指定分支就走 GitHub API 查默认分支
-        api = f"https://api.github.com/repos/{owner}/{repo}"
-        _assert_allowed_url(api)
-        try:
-            resp = requests.get(api, headers={"User-Agent": "checkin-system"},
-                                timeout=15, proxies=_build_proxies(proxy))
-            if resp.status_code == 404:
-                raise UpdateError(f"仓库不存在或未公开：{owner}/{repo}")
-            resp.raise_for_status()
-            branch = resp.json().get("default_branch") or "main"
-        except requests.RequestException as e:
-            raise UpdateError(f"查询仓库默认分支失败：{e}") from e
+        branch = DEFAULT_BRANCH
 
     return {
         "owner": owner,
@@ -204,7 +206,31 @@ def normalize_source(source: str, proxy: Optional[str] = None) -> Dict:
         "branch": branch,
         "raw_base": f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}",
         "web_url": f"https://github.com/{owner}/{repo}",
+        # 标记分支是"猜的"（用户没显式指定）→ 允许后续兜底探测别的分支
+        "branch_guessed": not bool(m.group(3)),
     }
+
+
+def probe_branch(src: Dict, proxy: Optional[str] = None) -> Optional[str]:
+    """当前分支读不到清单时，探测其它候选分支。
+
+    只做**轻量 raw 请求**（不需要 API token、不计入 API 限流）。
+    返回可用的分支名；都不行则返回 None。
+    """
+    owner, repo = src["owner"], src["repo"]
+    for cand in BRANCH_CANDIDATES:
+        if cand == src["branch"]:
+            continue
+        url = f"https://raw.githubusercontent.com/{owner}/{repo}/{cand}/{MANIFEST_NAME}"
+        try:
+            _assert_allowed_url(url)
+            resp = requests.get(url, headers={"User-Agent": "checkin-system"},
+                                timeout=12, proxies=_build_proxies(proxy))
+            if resp.status_code == 200 and resp.content:
+                return cand
+        except requests.RequestException:
+            continue
+    return None
 
 
 def _fetch_raw(src: Dict, path: str, timeout: int = 20,
@@ -232,16 +258,30 @@ def check_update(source: str, proxy: Optional[str] = None) -> Dict:
         "released_at": "",
         "file_count": 0,
         "web_url": "",
+        "branch": "",
         "error": "",
     }
     try:
         src = normalize_source(source, proxy=proxy)
         result["web_url"] = src["web_url"]
+        result["branch"] = src["branch"]
         raw = _fetch_raw(src, MANIFEST_NAME, proxy=proxy)
+        if raw is None and src.get("branch_guessed"):
+            # 用户没指定分支、默认 main 又读不到 → 兜底探测 master 等
+            # （走 raw 请求，不占用 GitHub API 限流额度）
+            alt = probe_branch(src, proxy=proxy)
+            if alt:
+                src["branch"] = alt
+                src["raw_base"] = (f"https://raw.githubusercontent.com/"
+                                   f"{src['owner']}/{src['repo']}/{alt}")
+                result["branch"] = alt
+                raw = _fetch_raw(src, MANIFEST_NAME, proxy=proxy)
         if raw is None:
             result["error"] = (
                 f"仓库里找不到 {MANIFEST_NAME}。\n"
-                "请确认仓库根目录有该清单文件（见 DEVELOPMENT.md 的更新章节）"
+                f"（已在分支 {src['branch']} 下查找）\n"
+                "请确认仓库根目录有该清单文件；若默认分支不是 main/master，"
+                "可在更新源里写成 .../tree/分支名 明确指定"
             )
             return result
         try:
@@ -347,8 +387,17 @@ def run_update(source: str, allow_downgrade: bool = False,
     try:
         src = normalize_source(source, proxy=proxy)
         raw = _fetch_raw(src, MANIFEST_NAME, proxy=proxy)
+        if raw is None and src.get("branch_guessed"):
+            alt = probe_branch(src, proxy=proxy)
+            if alt:
+                src["branch"] = alt
+                src["raw_base"] = (f"https://raw.githubusercontent.com/"
+                                   f"{src['owner']}/{src['repo']}/{alt}")
+                raw = _fetch_raw(src, MANIFEST_NAME, proxy=proxy)
         if raw is None:
-            raise UpdateError(f"仓库里找不到 {MANIFEST_NAME}")
+            raise UpdateError(
+                f"仓库里找不到 {MANIFEST_NAME}（分支 {src['branch']}）"
+            )
         manifest = json.loads(raw.decode("utf-8"))
 
         latest = str(manifest.get("version") or "")

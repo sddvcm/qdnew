@@ -1,7 +1,7 @@
 {
   "name": "checkin-system",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "released_at": "2026-09-19",
   "min_python": "3.10",
-  "notes": "「测试本地识别」改用云码官网的 4 张真实示例验证码（PNG+JPEG），逐张识别并展示结果，可自行对照准确率；上版本测试图损坏导致测试必失败的问题一并修复"
+  "notes": "修复「检查更新」报 403 rate limit exceeded：不再调用 api.github.com 查询默认分支（GitHub 未认证限流 60次/时/出口IP，走代理时共用节点极易被跑满），改为直接用 main、读不到再兜底探测 master（走 raw 域名，不计 API 额度）"
 }
