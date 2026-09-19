@@ -148,6 +148,69 @@
          margin-top: 4px;">准备中…</div>
   </div>
 
+  <div class="section-title" style="margin-top: 26px;">任务导出 / 导入</div>
+  <div class="help-text" style="margin-bottom: 10px;">
+    导出一个<strong>加密的配置文件</strong>（后缀 <code>.qdpack</code>），用于备份、
+    换机迁移或分享给别人。文件含账号密码，已用本程序专属密钥加密 ——
+    <strong>只有本程序能读取</strong>，其他程序或编辑器打不开。
+  </div>
+
+  <div style="padding: 12px; border-radius: var(--radius);
+              background: var(--bg-secondary, #f8fafc); font-size: 13px;
+              line-height: 1.9; margin-bottom: 14px;">
+    <strong>导出范围</strong>
+    <div style="margin-top: 8px; display: flex; gap: 16px; flex-wrap: wrap;">
+      <label style="font-weight:400; display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" id="expTemplates" checked> 含 HAR 模板</label>
+      <label style="font-weight:400; display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" id="expNotifies" checked> 含通知渠道</label>
+      <label style="font-weight:400; display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" id="expSettings"> 含系统设置（更新源/云码等）</label>
+    </div>
+    <div style="margin-top: 10px;">
+      <label style="font-weight:400; font-size:12px; color:var(--text-muted);">
+        <input type="checkbox" id="expAllTasks" checked onchange="onExpAllToggle()">
+        导出全部任务</label>
+      <span style="font-size:12px; color:var(--text-muted); margin-left:10px;"
+            id="expTaskCount"></span>
+    </div>
+    <div id="expTaskList" style="display:none; margin-top:8px; max-height:170px;
+         overflow:auto; border:1px solid var(--border-light); border-radius:6px;
+         padding:8px; background:#fff;"></div>
+  </div>
+
+  <div class="modal-actions" style="justify-content: flex-start; gap: 8px; flex-wrap: wrap;">
+    <button class="btn btn-primary" id="doExportBtn" onclick="doExport()">
+      导出配置文件</button>
+    <span id="transferMsg" style="font-size: 12px; color: var(--text-muted);"></span>
+  </div>
+
+  <div class="form-group" style="margin-top: 18px;">
+    <label>导入配置文件</label>
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <input type="file" id="importFile" accept=".qdpack"
+             style="font-size: 12px; flex: 1; min-width: 200px;">
+      <button class="btn btn-primary btn-sm" id="inspectBtn"
+              onclick="inspectPack()">读取并预览</button>
+    </div>
+    <div class="help-text">
+      先「读取并预览」确认内容无误，再点导入。导入会按下面选的方式处理同名项。
+      <br>⚠️ 换到别的机器导入时，两边的应用密钥必须一致（同一 fpk 升级/重装不会变）。
+    </div>
+  </div>
+
+  <div id="importPreview" style="display:none; margin-top:12px;"></div>
+
+  <div id="importProgress" style="display: none; margin-top: 10px;">
+    <div style="height: 6px; background: var(--border-light, #e5e7eb);
+                border-radius: 3px; overflow: hidden;">
+      <div id="importBar" style="height: 100%; width: 0%; background: var(--primary);
+                transition: width .2s;"></div>
+    </div>
+    <div id="importProgText" style="font-size: 12px; color: var(--text-muted);
+         margin-top: 4px;">准备中…</div>
+  </div>
+
   <div class="section-title" style="margin-top: 26px;">历史备份</div>
   <div id="backupList" style="font-size: 12px; color: var(--text-secondary);">读取中…</div>
 </div>
@@ -748,9 +811,266 @@ async function uninstallExtras() {
   }
 }
 
+// ==================== 任务导出 / 导入 ====================
+let transferOpts = null;
+let importBlob = null;      // 读到的文件内容，供"确认导入"用
+let importInfo = null;
+
+async function loadTransferOptions() {
+  try {
+    const r = await fetch('/api/transfer/options');
+    transferOpts = await r.json();
+  } catch(e) { transferOpts = null; return; }
+  const tasks = (transferOpts && transferOpts.tasks) || [];
+  document.getElementById('expTaskCount').textContent =
+    '（共 ' + tasks.length + ' 个任务）';
+  const box = document.getElementById('expTaskList');
+  if (!tasks.length) {
+    box.innerHTML = '<div class="help-text">还没有任务</div>';
+  } else {
+    box.innerHTML = tasks.map(t => `
+      <label style="display:flex; align-items:center; gap:6px; font-size:12px;
+                    font-weight:400; padding:3px 0;">
+        <input type="checkbox" class="impTaskChk" value="${t.id}" checked>
+        <span>${esc(t.name)}</span>
+        <span style="color:var(--text-muted);">${esc(t.plugin || '')}</span>
+      </label>`).join('');
+  }
+  // 没有模板/通知时禁用对应勾选并说明
+  const tChk = document.getElementById('expTemplates');
+  const nChk = document.getElementById('expNotifies');
+  if (transferOpts && !transferOpts.has_templates) {
+    tChk.checked = false; tChk.disabled = true;
+  }
+  if (transferOpts && !transferOpts.has_notifies) {
+    nChk.checked = false; nChk.disabled = true;
+  }
+}
+
+function onExpAllToggle() {
+  const all = document.getElementById('expAllTasks').checked;
+  document.getElementById('expTaskList').style.display = all ? 'none' : '';
+}
+
+function transferMsg(text, kind) {
+  const el = document.getElementById('transferMsg');
+  el.textContent = text || '';
+  el.style.color = kind === 'error' ? '#b91c1c'
+                 : kind === 'ok' ? '#15803d' : 'var(--text-muted)';
+}
+
+function doExport() {
+  const all = document.getElementById('expAllTasks').checked;
+  const taskIds = all ? null : Array.from(
+    document.querySelectorAll('.impTaskChk:checked')).map(x => parseInt(x.value, 10));
+  if (!all && taskIds.length === 0) {
+    showToast('error', '请至少勾选一个任务，或改为导出全部');
+    return;
+  }
+  const body = {
+    task_ids: taskIds,
+    include_templates: document.getElementById('expTemplates').checked,
+    include_notifies: document.getElementById('expNotifies').checked,
+    include_settings: document.getElementById('expSettings').checked,
+  };
+  const btn = document.getElementById('doExportBtn');
+  btn.disabled = true;
+  transferMsg('导出中…');
+  fetch('/api/transfer/export', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  }).then(async r => {
+    if (!r.ok) {
+      let m = '导出失败（HTTP ' + r.status + '）';
+      try { m = (await r.json()).message || m; } catch(e) {}
+      transferMsg(m, 'error'); showToast('error', m);
+      return;
+    }
+    const sum = r.headers.get('X-Export-Summary');
+    const blob = await r.blob();
+    // 用后端给的文件名
+    const cd = r.headers.get('Content-Disposition') || '';
+    let fname = 'checkin-tasks.qdpack';
+    const m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+    if (m) fname = decodeURIComponent(m[1]);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    if (sum) {
+      const s = JSON.parse(sum);
+      transferMsg(`已导出：${s.tasks} 个任务 / ${s.templates} 个模板 / ` +
+        `${s.notifies} 个通知渠道，${(s.size/1024).toFixed(1)}KB`, 'ok');
+      showToast('success', '导出成功，文件已开始下载');
+    } else {
+      transferMsg('已导出', 'ok'); showToast('success', '导出成功');
+    }
+  }).catch(e => {
+    transferMsg('导出失败：' + e.message, 'error');
+    showToast('error', '导出失败：' + e.message);
+  }).finally(() => { btn.disabled = false; });
+}
+
+function inspectPack() {
+  const f = document.getElementById('importFile').files[0];
+  if (!f) { showToast('error', '请先选择配置文件（.qdpack）'); return; }
+  const btn = document.getElementById('inspectBtn');
+  btn.disabled = true;
+  transferMsg('读取中…');
+  const fd = new FormData();
+  fd.append('file', f);
+  fetch('/api/transfer/inspect', {method: 'POST', body: fd})
+    .then(async r => {
+      const d = await r.json();
+      if (!d.success) {
+        importBlob = null; importInfo = null;
+        document.getElementById('importPreview').style.display = 'none';
+        transferMsg(d.message || '读取失败', 'error');
+        showToast('error', d.message || '读取失败');
+        return;
+      }
+      importBlob = f;
+      importInfo = d.info;
+      renderImportPreview(d.info);
+      transferMsg('读取成功，请确认后导入', 'ok');
+    })
+    .catch(e => transferMsg('读取失败：' + e.message, 'error'))
+    .finally(() => { btn.disabled = false; });
+}
+
+function renderImportPreview(info) {
+  const box = document.getElementById('importPreview');
+  const c = info.conflicts || {};
+  const list = (label, arr, conf) => {
+    if (!arr || !arr.length) return '';
+    return `<div style="margin-top:6px;"><strong>${label}（${arr.length}）</strong>：
+      ${arr.map(n => conf && conf.includes(n)
+        ? `<span style="color:#b45309;">${esc(n)} ⚠同名</span>`
+        : esc(n)).join('、')}</div>`;
+  };
+  const nConf = (c.tasks||[]).length + (c.templates||[]).length + (c.notifies||[]).length;
+  box.style.display = '';
+  box.innerHTML = `
+    <div style="padding:14px; border-radius:8px; background:#f8fafc;
+                border:1px solid var(--border-light); font-size:13px; line-height:1.8;">
+      <strong>配置包内容</strong>
+      <span style="color:var(--text-muted);">（导出于 ${esc(info.meta.exported_at || '未知')}）</span>
+      ${list('任务', info.tasks, c.tasks)}
+      ${list('插件', info.plugins)}
+      ${list('HAR 模板', info.templates, c.templates)}
+      ${list('通知渠道', info.notifies, c.notifies)}
+      ${info.settings && info.settings.length
+        ? `<div style="margin-top:6px;"><strong>系统设置</strong>：
+           ${info.settings.map(esc).join('、')}</div>` : ''}
+      ${!info.tasks.length && !info.templates.length && !info.notifies.length
+        ? '<div style="margin-top:6px; color:var(--text-muted);">（包内没有可导入的内容）</div>'
+        : ''}
+
+      ${nConf ? `<div style="margin-top:10px; padding:8px; border-radius:6px;
+          background:#fffbeb; color:#92400e;">
+        有 ${nConf} 项与本机同名。选择处理方式：
+        <div style="margin-top:6px; display:flex; gap:14px; flex-wrap:wrap;">
+          <label style="font-weight:400; display:flex; align-items:center; gap:4px;">
+            <input type="radio" name="conflictPolicy" value="skip" checked>
+            跳过同名（保留本机）</label>
+          <label style="font-weight:400; display:flex; align-items:center; gap:4px;">
+            <input type="radio" name="conflictPolicy" value="rename">
+            同名自动改名导入</label>
+          <label style="font-weight:400; display:flex; align-items:center; gap:4px;">
+            <input type="radio" name="conflictPolicy" value="overwrite">
+            用包内覆盖本机</label>
+        </div>
+      </div>` : ''}
+
+      <div style="margin-top:12px;">
+        <button class="btn btn-primary btn-sm" id="doImportBtn" onclick="doImport()">
+          确认导入</button>
+        <button class="btn btn-sm" onclick="cancelImport()">取消</button>
+      </div>
+    </div>`;
+}
+
+function cancelImport() {
+  importBlob = null; importInfo = null;
+  document.getElementById('importPreview').style.display = 'none';
+  document.getElementById('importFile').value = '';
+  transferMsg('');
+}
+
+function doImport() {
+  if (!importBlob) { showToast('error', '请先读取配置文件'); return; }
+  const el = document.querySelector('input[name="conflictPolicy"]:checked');
+  const policy = el ? el.value : 'skip';
+  const policyText = {skip: '跳过同名项（保留本机现有）',
+                      rename: '同名项自动改名后导入',
+                      overwrite: '用配置包内容覆盖本机同名项'}[policy];
+
+  if (!confirm('确定导入？\n\n同名处理方式：' + policyText +
+      '\n\n导入前会自动重载插件；若涉及覆盖，建议先导出一份当前配置做备份。')) return;
+
+  const btn = document.getElementById('doImportBtn');
+  const prog = document.getElementById('importProgress');
+  const bar = document.getElementById('importBar');
+  const txt = document.getElementById('importProgText');
+  if (btn) btn.disabled = true;
+  prog.style.display = '';
+  bar.style.width = '30%';
+  txt.textContent = '上传中…';
+
+  const xhr = new XMLHttpRequest();
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    const pct = 10 + Math.round(e.loaded / e.total * 60);
+    bar.style.width = pct + '%';
+    txt.textContent = '上传中 ' + pct + '%';
+  };
+  xhr.onload = () => {
+    if (btn) btn.disabled = false;
+    let d = {};
+    try { d = JSON.parse(xhr.responseText || '{}'); } catch(e) {}
+    if (xhr.status === 200 && d.success) {
+      bar.style.width = '100%';
+      txt.textContent = '导入完成';
+      showToast('success', d.message || '导入成功');
+      transferMsg(d.message || '导入完成', 'ok');
+      if (d.details && d.details.length) {
+        const box = document.getElementById('importPreview');
+        box.style.display = '';
+        box.innerHTML = `<div style="padding:12px; border-radius:8px; background:#f0fdf4;
+          border:1px solid #bbf7d0; font-size:12px; line-height:1.9;">
+          <strong>导入明细</strong><br>${d.details.map(esc).join('<br>')}
+          ${d.reload_error ? '<br><span style="color:#b91c1c;">插件重载报错：' +
+            esc(d.reload_error) + '</span>' : ''}
+          </div>`;
+      }
+      importBlob = null; importInfo = null;
+      document.getElementById('importFile').value = '';
+      loadTransferOptions();
+      loadStatus();
+    } else {
+      prog.style.display = 'none';
+      const m = d.message || ('导入失败（HTTP ' + xhr.status + '）');
+      showToast('error', m);
+      transferMsg(m, 'error');
+    }
+  };
+  xhr.onerror = () => {
+    if (btn) btn.disabled = false;
+    prog.style.display = 'none';
+    showToast('error', '导入上传失败（网络中断）');
+  };
+  xhr.open('POST', '/api/transfer/import');
+  const fd = new FormData();
+  fd.append('file', importBlob);
+  fd.append('on_conflict', policy);
+  xhr.send(fd);
+}
+
 loadStatus();
 loadNotifies();
 loadExtras();
+loadTransferOptions();
 {% endraw %}
 </script>
 {% endblock %}

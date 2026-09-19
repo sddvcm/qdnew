@@ -34,7 +34,8 @@ def create_app():
     atexit.register(shutdown)
 
     from app.routes import (index, task_api, plugin_api, notify_api,
-                            system_api, har_api, update_api, extras_api)
+                            system_api, har_api, update_api, extras_api,
+                            transfer_api)
     app.register_blueprint(index.bp)
     app.register_blueprint(task_api.bp, url_prefix="/api/tasks")
     app.register_blueprint(plugin_api.bp, url_prefix="/api/plugins")
@@ -45,6 +46,7 @@ def create_app():
     app.register_blueprint(har_api.bp)
     app.register_blueprint(update_api.bp)
     app.register_blueprint(extras_api.bp, url_prefix="/api/extras")
+    app.register_blueprint(transfer_api.bp, url_prefix="/api/transfer")
 
     @app.errorhandler(404)
     def not_found(e):

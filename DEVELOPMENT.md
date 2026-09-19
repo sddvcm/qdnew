@@ -676,7 +676,72 @@ captcha-local-pack-1.0.zip
 （复用 `build/wheels/` 里已下好的 manylinux wheel，解压即用、不做二进制改动）
 产物落在 `packaging/fnos/dist/captcha-local-pack-<ver>.zip`（约 130MB）。
 
-### 16.4 程序内自动更新（updater.py）
+### 16.4 任务导出 / 导入（app/transfer.py）
+
+**目标**：备份、换机迁移、分享配置，且导出文件**只有本程序能读**。
+
+**格式 `.qdpack`**
+
+```
+┌───────────────────┬────────────────────────────────────────────┐
+│ 明文头（固定 9B）  │ AES-256-GCM 密文                            │
+│ magic"QDPACK1"(7) │ nonce(12B) ‖ ciphertext ‖ tag(16B)          │
+│ + 版本号(2B, LE)  │                                            │
+└───────────────────┴────────────────────────────────────────────┘
+```
+
+- **密钥**：`PBKDF2-HMAC-SHA256(CHECKIN_SECRET_KEY, 固定盐, 200000 次, 32B)`
+- **防篡改**：GCM 自带 tag 校验；**明文头作为 AAD 绑定**，改 magic/版本号也失败
+- **"只认自己"**：外部程序不知道 magic、没有密钥、过不了 GCM 校验
+
+**⚠️ 密钥绑定部署（这是特性不是缺陷）**
+
+密钥只依赖 `CHECKIN_SECRET_KEY`，**刻意不掺入** DATA_DIR / 主机名 / 时间 ——
+否则"换机导入"永远失败。代价是：**换机时两边密钥必须一致**。
+fpk 模式下密钥在 `etc/app.env` 生成且**升级不丢**，所以同机升级照常能导入；
+换到新机器要么同步该环境变量，要么用旧机导出的包（新机得有同密钥）。
+
+> 不做"用户自定义口令"是刻意的：多一个密码就多一堆"密码忘了数据没了"的支持成本。
+
+**内容范围**（可在页面勾选）
+
+| 类别 | 说明 |
+|---|---|
+| tasks | 任务全字段 + **密码/Cookie（导出前解密，整包再加密）** |
+| plugins | 只带被任务引用到的插件，含 `_src_id` 用于跨机 id 映射 |
+| har_templates | HAR 模板 |
+| notify_configs | 通知渠道配置 |
+| task_notify | 任务↔通知绑定（靠名字关联重建） |
+| settings | 更新源/代理/验证码设置（可选，默认不带） |
+
+**★ 跨机 id 映射（最容易踩的点）**
+
+任务里存的 `plugin_id` 是**导出机**的数据库 id，导入端不能直接用。
+所以导出时给每个插件带上 `_src_id`，导入端：
+1. 先按 **name** 建/找本地插件，得到 `plugin_map[name] = local_id`
+2. 再用 `_src_id → name → local_id` 反查任务的本地 plugin_id
+3. 兜底：只有一个插件时直接用它（HAR 模板类场景常见）
+
+少了 `_src_id`，所有任务都会"找不到插件"被跳过。
+
+**接口**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/transfer/options` | 可导出任务列表（不含敏感字段） |
+| POST | `/api/transfer/export` | 导出，返回附件流 + `X-Export-Summary` 头 |
+| POST | `/api/transfer/inspect` | 上传解密**预览**（不写库），含同名冲突标注 |
+| POST | `/api/transfer/import` | 执行导入，`on_conflict` = skip/overwrite/rename |
+
+**冲突策略**
+- `skip`（默认）：同名保留本机
+- `rename`：同名加后缀 `xxx (导入)` / `xxx (导入2)`
+- `overwrite`：用包内覆盖本机
+
+⚠️ 插件**不做 rename**：插件名对应 `plugins/*.py` 的类名，改名后根本加载不出来；
+同名即复用本地插件（任务挂上去照样能用）。
+
+### 16.5 程序内自动更新（updater.py）
 
 **目标**：Web 上点一下就能升级，不用重新部署。
 
@@ -730,7 +795,7 @@ python -c "import updater,json;print(json.dumps(updater.build_manifest('1.3.0','
 ```
 然后把改动 + `update_manifest.json` 一起提交到仓库根目录。
 
-### 16.4 `docker-compose.yml` 的代码挂载
+### 16.6 `docker-compose.yml` 的代码挂载
 
 ```yaml
 volumes:
@@ -740,7 +805,7 @@ volumes:
 这是「更新后不用重新部署」的**前提**。依赖装在 site-packages 不在 `/app`，
 所以挂载不会覆盖已安装依赖；但**改了 requirements.txt 仍需重建镜像**。
 
-### 16.5 新增/改动的文件
+### 16.7 新增/改动的文件
 
 | 文件 | 说明 |
 |---|---|
@@ -757,7 +822,7 @@ volumes:
 | `packaging/fnos/build_captcha_pack.py` | 新增（v1.4.0）。构建本地识别组件包 |
 | `packaging/fnos/make_runtime_tgz.py` | 改动（v1.3.0）。ELF strip + 裁剪，771MB→113MB |
 
-### 16.7 测试
+### 16.8 测试
 
 ```bash
 python __har_test/selftest.py         # 57 项：har 渲染/执行
