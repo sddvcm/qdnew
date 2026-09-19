@@ -56,7 +56,16 @@ docker compose up -d --build
 ```
 
 - `--build`：第一次必须加（要构建镜像）
-- 首次构建约 2~5 分钟（要装 `ddddocr`/`onnxruntime`，体积较大）
+- 首次构建约 1~2 分钟（默认只装核心依赖；若启用本地验证码识别会多装约 400MB，见下）
+
+**需要本地验证码识别（可选）**：
+
+默认不装 `ddddocr`/`opencv`/`onnxruntime`（约 400MB），验证码走云码。要本地识别就加参数：
+
+```bash
+docker compose build --build-arg WITH_CAPTCHA=true
+docker compose up -d
+```
 
 **看日志确认起来了**：
 

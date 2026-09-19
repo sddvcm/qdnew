@@ -14,15 +14,26 @@ ENV CHECKIN_SECRET_KEY=change-me-to-a-random-string
 # onnxruntime / opencv 是预编译 wheel，正常不需要编译工具。
 # 装 libglib2.0-0 是个保险：部分 opencv 版本运行时会链接到它，
 # 缺了会在 import cv2 时报 "libGL.so.1: cannot open shared object file"。
+# （仅当启用本地验证码识别 WITH_CAPTCHA=true 时才需要 opencv）
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # 依赖单独一层：代码改动时不用重装依赖（利用 Docker 层缓存）
-COPY requirements.txt .
+#
+# 默认只装核心依赖（requirements.txt，约 30MB）。
+# 本地验证码识别（ddddocr/opencv/onnxruntime/numpy，约 400MB）是**可选**的：
+#   构建时加 --build-arg WITH_CAPTCHA=true 才会装 requirements-captcha.txt。
+# 不装时验证码请用云码（cloud 后端）；captcha.py 对缺失依赖有人话兜底。
+ARG WITH_CAPTCHA=false
+COPY requirements.txt requirements-captcha.txt ./
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt \
-       -i https://pypi.tuna.tsinghua.edu.cn/simple
+       -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    && if [ "$WITH_CAPTCHA" = "true" ]; then \
+           pip install --no-cache-dir -r requirements-captcha.txt \
+               -i https://pypi.tuna.tsinghua.edu.cn/simple; \
+       fi
 
 # 拷代码（.dockerignore 已排除 .env / data / logs / .git 等，不会进镜像）
 COPY . .
