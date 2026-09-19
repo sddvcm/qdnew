@@ -13,7 +13,7 @@ API：
 已于 v1.5.5 移除 —— 发版在开发机上用 `updater.build_manifest()` 脚本化完成，
 更可靠（网页版只能哈希"当前这台机器"的文件，且容易忘记先改 version.json）。
 """
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, render_template, request
 
 import updater
 from app.database import get_db
@@ -179,10 +179,24 @@ def run():
     except Exception as e:
         reload_error = str(e)
 
+    # 清掉模板缓存，让新的 templates/*.html 立即生效。
+    # 虽然 create_app() 里开了 TEMPLATES_AUTO_RELOAD，但这是"更新后"的关键路径，
+    # 显式清一次更稳妥（auto_reload 靠 mtime 判断，某些文件系统精度/时区差异下
+    # 可能仍认为文件没变）。实测踩过：更新到 1.5.5 后设置页还是旧界面，
+    # 用户以为更新失败 —— 其实就是模板被 Jinja 缓存住了。
+    try:
+        current_app.jinja_env.cache.clear()
+    except Exception:           # noqa: BLE001 —— 清不掉也不该让更新报错
+        pass
+
     return jsonify({
         "success": True,
         "message": f"已更新到 {result['version']}，共写入 {len(result['files'])} 个文件",
         "result": result,
         "reload_error": reload_error,
-        "need_restart": True,
+        # 涉及 app/ 核心模块（路由、蓝图）的改动仍需重启才完全生效，
+        # 但模板/静态文件/插件现在已即时生效，不必再让用户无脑重启。
+        "need_restart": any(
+            str(f).startswith(("app/", "har/")) for f in result.get("files", [])
+        ),
     })

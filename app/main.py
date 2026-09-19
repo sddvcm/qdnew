@@ -17,6 +17,17 @@ def create_app():
                 static_folder=os.path.join(os.path.dirname(__file__), "static"))
     app.secret_key = os.environ.get("CHECKIN_SECRET_KEY", "checkin-default-key-change-me")
 
+    # 模板改动即时生效：Flask 默认在非 debug 模式下**永久缓存模板**，
+    # 自动更新换了 templates/*.html 后不重启就看不到新界面
+    # （实测踩过：更新到 1.5.5 后设置页还是旧的样子，用户以为更新没成功）。
+    # 打开 auto_reload 后每次渲染都会检查 mtime，改了就读新的。
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.jinja_env.auto_reload = True
+    # 静态文件同理：加长缓存会把旧 CSS/JS 一直发给浏览器。
+    # 设一个较短值（1 小时）即可 —— 模板里的引用带版本参数时更容易失效，
+    # 但这里没有加参数，所以别设太长。
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
+
     init_db()
 
     # 可选组件（本地验证码识别包）—— 必须在插件加载前注入 sys.path，

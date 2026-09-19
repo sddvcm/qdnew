@@ -1,14 +1,14 @@
 {
   "name": "checkin-system",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "released_at": "2026-09-19",
-  "notes": "移除设置页的「发版辅助」（网页生成更新清单的按钮）：它只能哈希当前机器的文件、容易忘记先改版本号，发版统一在开发机用命令行完成；同步更新开发文档的发布流程说明",
+  "notes": "修复自动更新后界面不刷新（更新到新版但页面仍是旧样子）：开启模板自动重载，并在更新流程结束时主动清空 Jinja 模板缓存。此前必须重启容器才能看到新界面，容易被误判为更新失败",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "5f6349210f7fd5be3908ba252eb49a444d277be0b68e002bb1b97bebccf9b1df",
     "app/engine.py": "3d95ee4e150ba4cc6b35637e7a49e6ec78c5bae4769b80e9009395e6161b34ef",
     "app/extras.py": "cfd2b9c9ced273f2bdfdd684d6289d349079c26ebcc861de01ac28cc0ebb3c4d",
-    "app/main.py": "a7000d03715789383d028bdd528ab0a5c761c92fa1dc63ebfaebe9e991b13fb1",
+    "app/main.py": "994ec9e3ff76f4e711a530f0de46f7c199cfc986464db089d49da587e2054596",
     "app/models.py": "995e59e017753f5f27d4efc4d4063f56d7c5f258121e86ebd48929d29263ef3f",
     "app/notifier.py": "183d8d0306692427c6616b5fedacca340b9fa791445028effa02a8874df1fa71",
     "app/plugin_loader.py": "18f21609ec7c7ee8e80b2ec9d7f3ded28a903c37ecceb96e08dabc75c7195264",
@@ -22,7 +22,7 @@
     "app/routes/system_api.py": "defd94f8962029a8f4843205a056e2b2df4474e28b23cb824a6e59155dde4975",
     "app/routes/task_api.py": "f15ac1f089cb9e0574b7119bd588c3cd08e7dd91539cd76ac9a4f241a9533faf",
     "app/routes/transfer_api.py": "6242bd446d99de85f0b38df728f57ed1e747794c7895d38ab50d2587a307fe5c",
-    "app/routes/update_api.py": "14b3c8b7daab27415cf6646e021fb3438e4d38ea53077222682bc1db0d23cf7d",
+    "app/routes/update_api.py": "8c3397a62a4413ad1dc82295c3ac3f414dc3364e9788142bd7e34386398dcbd6",
     "app/routes/__init__.py": "2231d15749360cdc2f16b10779b9ac5e206f9884c4f274149ec474ee1f6d5645",
     "app/static/css/app.css": "d078575ec79d445489547168103f0c6b49a172a125af488f065cd8962e755927",
     "app/static/js/app.js": "f24035819e06961c487a1df0bc2712f5fe02d4aeab1f04008557d1a65478c439",
@@ -55,6 +55,6 @@
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
     "updater.py": "e8f59a2de5fda21311dd42a587cc41afe954496431b6db9ac303d57fa6f937c0",
-    "version.json": "5508697a897924c15855e1157a144dc3d1fa1dac057da48e4ff1f47f2e7f82b5"
+    "version.json": "31efb6d9d8f62a806bcf2db88d40d6b23f55b9145f17a76b3a118732d2f1d7fc"
   }
 }
