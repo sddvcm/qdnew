@@ -57,6 +57,11 @@ packaging/fnos/build/
 packaging/fnos/dist/
 packaging/fnos/*.log
 
+# 旧的打包目录（早期脚本用过 packaging/build/，现已统一到 fnos/build/）
+# 这里可能有 70MB+ 的 python-runtime.tar.gz，绝不能进 git
+packaging/build/
+*.tar.gz
+
 # ---- fpk 打包：fnpack 项目目录与中间产物 ----
 packaging/fnos/build/fnpack_src/
 packaging/fnos/build/payload/
