@@ -158,7 +158,8 @@ def stage_project(version: str) -> str:
         ("version", version),
         ("display_name", "签到管理系统"),
         ("desc", "轻量级插件化自动签到平台。内置完整 Python 运行时，安装后无需联网；"
-                 "支持 HAR 抓包模板、验证码识别、7 种通知渠道与程序内自动更新。"),
+                 "支持 HAR 抓包模板、7 种通知渠道与程序内自动更新。"
+                 "验证码默认走云码（可选内置本地识别）。"),
         ("platform", "x86"),
         ("source", "thirdparty"),
         ("maintainer", "sddvcm"),
@@ -230,7 +231,8 @@ def sync_source_into_payload():
     """
     log("同步源码 → build/payload …")
     dirs = ("app", "har", "plugins", "templates")
-    files = ("captcha.py", "updater.py", "version.json", "requirements.txt")
+    files = ("captcha.py", "updater.py", "version.json", "requirements.txt",
+             "requirements-captcha.txt")
     for d in dirs:
         s_root = os.path.join(ROOT, d)
         d_root = os.path.join(PAYLOAD, d)
@@ -252,6 +254,39 @@ def sync_source_into_payload():
             shutil.copy2(s, os.path.join(PAYLOAD, f))
 
 
+def rebuild_runtime_if_requested():
+    """按需重建 runtime.tar（裁剪 Tcl/Tk/pip/静态库；验证码依赖默认不打包）。
+
+    触发条件：环境变量 `FDA_REBUILD_RUNTIME=1`，或 runtime.tar 不存在。
+    重建后 runtime.tar 会同步进 payload。
+    """
+    payload_tar = os.path.join(PAYLOAD, "runtime.tar")
+    want = os.environ.get("FDA_REBUILD_RUNTIME", "").strip() in ("1", "true", "yes")
+    if not want and os.path.isfile(payload_tar):
+        return
+    mkrt = os.path.join(HERE, "make_runtime_tgz.py")
+    if not os.path.isfile(mkrt):
+        log("⚠️ 找不到 make_runtime_tgz.py，跳过运行时重建")
+        return
+    log("重建 runtime.tar（裁剪版）…")
+    emb = os.environ.copy()
+    if os.environ.get("FDA_EMBED_CAPTCHA", "").strip() in ("1", "true", "yes"):
+        emb["FDA_EMBED_CAPTCHA"] = "1"
+    r = subprocess.run([sys.executable, mkrt], cwd=HERE, env=emb,
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=3600)
+    tail = ((r.stdout or "") + (r.stderr or "")).strip()[-800:]
+    log(tail)
+    if r.returncode != 0 or "RUNTIME_TAR_OK" not in (r.stdout or ""):
+        raise SystemExit(f"RUNTIME_REBUILD_FAILED\n{tail}")
+    built = os.path.join(HERE, "build", "runtime.tar")
+    if not os.path.isfile(built):
+        raise SystemExit("runtime.tar 未生成")
+    os.makedirs(PAYLOAD, exist_ok=True)
+    shutil.copy2(built, payload_tar)
+    log(f"✓ runtime.tar 就绪 {os.path.getsize(built)/1024/1024:.1f}MB")
+
+
 def main():
     exe = find_fnpack()
     version = read_version()
@@ -262,6 +297,7 @@ def main():
             "请先跑 build_fpk.py 的 stage_payload()（或另行准备 app/ 内容）"
         )
     sync_source_into_payload()
+    rebuild_runtime_if_requested()
     stage_project(version)
     fpk = run_fnpack(exe, SRC)
     verify(fpk)

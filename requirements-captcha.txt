@@ -1,0 +1,15 @@
+# 可选：本地验证码识别（ddddocr）依赖 —— 约 400MB 解包体积
+#
+# ⚠️ 默认**不装**。装这些会让 fpk 体积从约 90MB 涨到约 300MB。
+#
+# 何时需要：
+#   只有「验证码识别后端」选 local（本地 ddddocr）时才需要。
+#   选 cloud（云码 jfbym）则完全不需要这些库。
+#
+# 安装方式（Docker / 裸跑）：
+#   pip install -r requirements.txt -r requirements-captcha.txt
+#
+# 或在 fpk 构建时：
+#   FDA_EMBED_CAPTCHA=1 python packaging/fnos/build_with_fnpack.py
+-r requirements.txt
+ddddocr>=1.4.0

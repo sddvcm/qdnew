@@ -43,14 +43,14 @@ extract_runtime() {
         echo "内置运行时包缺失（runtime.tar），安装包可能不完整。" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
         return 1
     fi
-    log_msg "解压内置运行时（约 400MB，需要 1~3 分钟）…"
+    log_msg "解压内置运行时（约 120MB，需要 10~40 秒）…"
     # ⚠️ 必须 cd 进目标目录用**相对路径**解压：
     # GNU tar 会把 `C:/xxx` 这类含冒号的路径当成 `主机:路径` 远程语法
     # （报 "Cannot connect to C: resolve failed"）。fnOS 上是 POSIX 路径
     # 虽不会触发，但相对路径写法在所有 tar 实现上都安全，测试环境也能跑通。
     if ! (cd "$APP_DIR" && tar -xf runtime.tar) 2>>"$LOG_DIR/install.log"; then
         log_msg "ERROR: 运行时解压失败"
-        echo "内置运行时解压失败，请检查磁盘空间（需要约 1GB 可用）。" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+        echo "内置运行时解压失败，请检查磁盘空间（需要约 400MB 可用）。" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
         return 1
     fi
     chmod +x "$RUNTIME_DIR/bin/"* 2>/dev/null
