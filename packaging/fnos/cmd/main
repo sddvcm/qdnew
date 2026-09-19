@@ -9,6 +9,8 @@ source "$SCRIPT_DIR/common.sh"
 
 start_app() {
     ensure_dirs
+    # 老版本数据在 @appdata 下 —— 升级后首次启动搬去 @appshare（幂等）
+    migrate_legacy_data
     if is_running; then
         log_msg "start: 已在运行"
         return 0

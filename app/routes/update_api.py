@@ -4,15 +4,18 @@
     GET  /settings              系统设置（更新源配置 + 检查/执行更新）
 
 API：
-    GET  /api/update/status     当前版本 + 已配置的更新源 + 备份列表
+    GET  /api/update/status     当前版本 + 安装包版本 + 已配置的更新源 + 备份列表
     POST /api/update/config     保存更新源
     POST /api/update/check      检查是否有新版本（只读，不下载）
     POST /api/update/run        执行更新（下载+校验+写入+重载插件）
 
 注：原先还有个 /api/update/manifest（在网页上生成清单下载，即「发版辅助」），
-已于 v1.5.5 移除 —— 发版在开发机上用 `updater.build_manifest()` 脚本化完成，
-更可靠（网页版只能哈希"当前这台机器"的文件，且容易忘记先改 version.json）。
-"""
+   已于 v1.5.5 移除 —— 发版在开发机上用 `updater.build_manifest()` 脚本化完成，
+   更可靠（网页版只能哈希"当前这台机器"的文件，且容易忘记先改 version.json）。
+   """
+import os
+import re
+
 from flask import Blueprint, current_app, jsonify, render_template, request
 
 import updater
@@ -72,10 +75,32 @@ def settings_page():
 
 # ==================== API ====================
 
+def _pkg_version() -> str:
+    """安装包（fpk）的版本 —— 应用中心显示的那个。
+
+    fpk 装机后安装根目录有个 `manifest` 文本（version = x.y.z）。
+    自动更新只改 version.json（运行版本），**改不了应用中心的记录** ——
+    那是飞牛包管理器按安装时的 manifest 记的，只有重装/升级 fpk 才会变。
+    把两个版本都摆出来，用户就不会困惑"明明更新了怎么应用中心还是旧号"。
+    开发机/Docker 没有这个文件 → 返回空串，前端不显示这一行。
+    """
+    path = os.path.join(updater.ROOT, "manifest")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.match(r"\s*version\s*=\s*(\S+)", line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return ""
+
+
 @bp.route("/api/update/status", methods=["GET"])
 def status():
     return jsonify({
         "version": updater.current_version(),
+        "pkg_version": _pkg_version(),
         "source": _get_source(),
         "proxy": _get_proxy(),
         "backups": updater.list_backups(),

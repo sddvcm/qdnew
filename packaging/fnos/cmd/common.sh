@@ -12,13 +12,34 @@ ENV_FILE="${ETC_DIR}/app.env"
 LOG_DIR="${VAR_DIR}/logs"
 LOG_FILE="${LOG_DIR}/app.log"
 PID_FILE="${VAR_DIR}/app.pid"
-DATA_DIR="${VAR_DIR}/data"
-USER_PLUGINS_DIR="${VAR_DIR}/user_plugins"
-BACKUP_DIR="${VAR_DIR}/backups"
 RUNTIME_DIR="${APP_DIR}/runtime"
 RUNTIME_TAR="${APP_DIR}/runtime.tar"
 PY_BIN="${RUNTIME_DIR}/bin/python3"
 DEFAULT_PORT=5800
+
+# ---- 用户可见的数据目录（@appshare）----
+# TRIM_PKGVAR 指向 @appdata（应用私有数据，文件管理器里看不到）。
+# 用户要求把数据库/备份/插件/导出文件放到同卷的 @appshare/<应用名> 下，
+# 这样在飞牛文件管理里能直接找到、随时备份。
+# ⚠️ 卷名从 TRIM_PKGVAR 推导，**绝不写死 /vol1** —— 应用装在哪个卷就落在哪个卷
+#    （含 root 安装到系统盘 /usr/local/apps 的情况）。
+case "${TRIM_PKGVAR}" in
+    */@appdata/*)
+        SHARE_VOL="${TRIM_PKGVAR%%/@appdata*}"          # 如 /vol1
+        SHARE_ROOT="${SHARE_VOL}/@appshare/${APP_NAME}"
+        ;;
+    /usr/local/apps/@appdata/*)
+        SHARE_ROOT="/usr/local/apps/@appshare/${APP_NAME}"
+        ;;
+    *)
+        # 未知布局：不猜，回退到 var（老行为），保证能跑
+        SHARE_ROOT="${VAR_DIR}"
+        ;;
+esac
+
+DATA_DIR="${SHARE_ROOT}/data"
+USER_PLUGINS_DIR="${SHARE_ROOT}/user_plugins"
+BACKUP_DIR="${DATA_DIR}/backups"          # 与 updater.py 的 DATA_DIR/backups 一致
 
 log_msg() {
     mkdir -p "$LOG_DIR" 2>/dev/null
@@ -27,7 +48,62 @@ log_msg() {
 
 # 初始化目录结构（幂等，安装/升级/启动都可重复调用）
 ensure_dirs() {
-    mkdir -p "$LOG_DIR" "$DATA_DIR" "$USER_PLUGINS_DIR" "$BACKUP_DIR" "$ETC_DIR" 2>/dev/null
+    mkdir -p "$LOG_DIR" "$DATA_DIR" "$USER_PLUGINS_DIR" "$BACKUP_DIR" \
+             "$ETC_DIR" "$SHARE_ROOT" 2>/dev/null
+}
+
+# 一次性迁移：把历史版本落在 @appdata（TRIM_PKGVAR）下的用户数据搬到 @appshare。
+# 幂等；目标已有同名项时**不覆盖**（保新数据），只搬缺的。
+# 在 start / install_callback / upgrade_callback 里都会被调用 ——
+# 对已装 1.5.x 的机器，升级后第一次启动即完成搬家，无需手工操作。
+#
+# ⚠️ 两个坑（实测踩过）：
+# 1. `mv src dst` 当 dst 存在时会把 src **塞进 dst 里面**（变成 dst/src），
+#    不是合并。所以 dst 为空时要先 rmdir 再 mv。
+# 2. ensure_dirs 会先建好空的 $DATA_DIR/backups —— 若只判断"dst 非空就跳过"，
+#    这个脚手架空目录会让迁移永远被跳过。空目标必须当"不存在"处理。
+migrate_legacy_data() {
+    local item src dst base moved skipped
+    for item in data user_plugins backups; do
+        src="${VAR_DIR}/${item}"
+        dst="${SHARE_ROOT}/${item}"
+        [ -d "$src" ] || continue
+        mkdir -p "$dst" 2>/dev/null
+
+        if [ ! -n "$(ls -A "$dst" 2>/dev/null)" ]; then
+            # 目标为空（可能只是脚手架）：删掉空壳后整体搬
+            rmdir "$dst" 2>/dev/null
+            if mv "$src" "$dst" 2>/dev/null; then
+                log_msg "migrate: ${src} -> ${dst}"
+            else
+                # mv 失败（跨设备等）：退回复制
+                if cp -ap "$src/." "$dst/" 2>/dev/null; then
+                    log_msg "migrate: 复制 ${src} -> ${dst}（跨设备回退）"
+                else
+                    log_msg "migrate: 迁移 ${src} 失败，保留原位置继续"
+                fi
+            fi
+        else
+            # 目标非空：逐项合并，已存在的同名项跳过（不覆盖新数据）
+            moved=0
+            skipped=0
+            for f in "$src"/.??* "$src"/*; do
+                [ -e "$f" ] || continue
+                base=$(basename "$f")
+                if [ -e "$dst/$base" ]; then
+                    skipped=$((skipped + 1))
+                    continue
+                fi
+                if mv "$f" "$dst/" 2>/dev/null; then
+                    moved=$((moved + 1))
+                fi
+            done
+            log_msg "migrate: ${item} 合并完成（移入 ${moved} 项，跳过已存在 ${skipped} 项）"
+        fi
+
+        # 源目录搬空了就清理掉
+        [ -d "$src" ] && [ -z "$(ls -A "$src" 2>/dev/null)" ] && rmdir "$src" 2>/dev/null
+    done
 }
 
 # 在 NAS（Linux）上解压内置运行时。
@@ -101,7 +177,7 @@ EOF
 fix_ownership() {
     if [ "$(id -u)" = "0" ] && [ -n "$TRIM_USERNAME" ]; then
         chown -R "$TRIM_USERNAME:$TRIM_GROUPNAME" \
-            "$APP_DIR" "$VAR_DIR" "$ETC_DIR" 2>/dev/null
+            "$APP_DIR" "$VAR_DIR" "$ETC_DIR" "$SHARE_ROOT" 2>/dev/null
         log_msg "已修正目录归属: $TRIM_USERNAME:$TRIM_GROUPNAME"
     fi
 }

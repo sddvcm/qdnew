@@ -67,8 +67,13 @@
   <div id="updateResult" style="display: none; margin-top: 18px;"></div>
 
   <div class="form-group" style="margin-top: 22px;">
-    <label>当前版本</label>
-    <div id="curVersion" style="font-family: var(--mono); font-size: 13px;">读取中…</div>
+    <label>版本信息</label>
+    <div id="curVersion" style="font-family: var(--mono); font-size: 13px; line-height: 2;">
+      读取中…</div>
+    <div class="help-text" id="pkgVersionHint" style="display: none;">
+      「安装包版本」是飞牛应用中心显示的号，<strong>只有重装 / 升级安装包才会变</strong>；
+      「运行版本」随程序内自动更新走。两者可能不同，以运行版本为准。
+    </div>
   </div>
 
   </div>
@@ -271,9 +276,20 @@ async function loadStatus() {
     const r = await fetch('/api/update/status');
     const d = await r.json();
     const v = d.version || {};
-    document.getElementById('curVersion').textContent =
-      (v.version || '未知') + (v.released_at ? '  (发布于 ' + v.released_at + ')' : '') +
-      (v.notes ? '  — ' + v.notes : '');
+    // 运行版本（自动更新改这个）+ 安装包版本（应用中心显示的，重装 fpk 才变）
+    let verText = '<strong>运行版本</strong>：' + (v.version || '未知') +
+      (v.released_at ? '  (发布于 ' + v.released_at + ')' : '');
+    if (v.notes) verText += '<br><span style="color:var(--text-secondary);">' +
+      esc(v.notes) + '</span>';
+    if (d.pkg_version) {
+      verText += '<br><strong>安装包版本</strong>：' + esc(d.pkg_version) +
+        '（应用中心显示的号）';
+      if (d.pkg_version !== v.version) {
+        verText += ' <span style="color:#b45309;">≠ 运行版本（曾自动更新过）</span>';
+      }
+      document.getElementById('pkgVersionHint').style.display = '';
+    }
+    document.getElementById('curVersion').innerHTML = verText;
     if (!document.getElementById('source').value && d.source) {
       document.getElementById('source').value = d.source;
     }

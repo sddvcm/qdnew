@@ -8,8 +8,9 @@ source "$SCRIPT_DIR/common.sh"
 
 log_msg "install_callback: 开始 (APP_DIR=$APP_DIR)"
 
-# 1. 数据目录（全部落在 var=@appdata，升级/重装不丢）
+# 1. 数据目录（用户数据落在 @appshare —— 文件管理可见；升级/重装不丢）
 ensure_dirs
+migrate_legacy_data
 
 # 2. 解压内置运行时（tar 还原软链与执行位；失败则让安装报错退出）
 if ! extract_runtime; then

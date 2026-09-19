@@ -8,6 +8,8 @@ source "$SCRIPT_DIR/common.sh"
 log_msg "upgrade_callback: 开始 (OLD=$TRIM_OLD_APPVER NEW=$TRIM_APPVER)"
 
 ensure_dirs
+# 老版本用户数据在 @appdata 下 —— 升级时搬到 @appshare（幂等）
+migrate_legacy_data
 
 # 强制重新解压运行时（新包可能带了新版 Python / 依赖）
 rm -rf "$RUNTIME_DIR" 2>/dev/null

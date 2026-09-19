@@ -1,8 +1,8 @@
 {
   "name": "checkin-system",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "released_at": "2026-09-19",
-  "notes": "修复自动更新后界面不刷新（更新到新版但页面仍是旧样子）：开启模板自动重载，并在更新流程结束时主动清空 Jinja 模板缓存。此前必须重启容器才能看到新界面，容易被误判为更新失败",
+  "notes": "用户数据（数据库/备份/插件/导出文件）迁移到安装卷的 @appshare/checkin-system/ 下，飞牛文件管理里可直接找到；升级后首次启动自动搬家；设置页同时显示运行版本与安装包版本（应用中心显示安装包版本，重装才会变）",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
     "app/database.py": "5f6349210f7fd5be3908ba252eb49a444d277be0b68e002bb1b97bebccf9b1df",
@@ -22,7 +22,7 @@
     "app/routes/system_api.py": "defd94f8962029a8f4843205a056e2b2df4474e28b23cb824a6e59155dde4975",
     "app/routes/task_api.py": "f15ac1f089cb9e0574b7119bd588c3cd08e7dd91539cd76ac9a4f241a9533faf",
     "app/routes/transfer_api.py": "6242bd446d99de85f0b38df728f57ed1e747794c7895d38ab50d2587a307fe5c",
-    "app/routes/update_api.py": "8c3397a62a4413ad1dc82295c3ac3f414dc3364e9788142bd7e34386398dcbd6",
+    "app/routes/update_api.py": "8c6ba287017ccbf68559710d62d8ff6266c476a17285d10cf10b7c1bd87807ba",
     "app/routes/__init__.py": "2231d15749360cdc2f16b10779b9ac5e206f9884c4f274149ec474ee1f6d5645",
     "app/static/css/app.css": "d078575ec79d445489547168103f0c6b49a172a125af488f065cd8962e755927",
     "app/static/js/app.js": "f24035819e06961c487a1df0bc2712f5fe02d4aeab1f04008557d1a65478c439",
@@ -47,7 +47,7 @@
     "templates/har_new.html": "89ddc40a90f42c329236ae8e962b9ff0e3e38bbb49b815b58eba629b97574760",
     "templates/index.html": "c353c38935f04eb2d865b613e4c78867c4df59f34635a99ab37e5eb42662c61a",
     "templates/plugin_import.html": "6ff9455f5bd2cb6963fade2537a90d2db5bec9dec8613c0d2d954d755413a9ec",
-    "templates/settings.html": "92d9f18c5196d1321173567bc8b3596ce621f251aa5b51477b69a5ded9e554b4",
+    "templates/settings.html": "4d6efb26b0aad06ccdb58ba0ab4ce22d868523838f92fd75f854809502968e56",
     "templates/task_form.html": "ce432baf6076eeece990d15b7dbe2fe838f27f8d9b3250fb00331473284578d7",
     ".env.example": "dd2d7cd04bf50554183da61460b66b4cb4811776f312af2a46739fbb3d1ec338",
     "DEVELOPMENT.md": "10ea9e617abec4a3ac8c474e4c625e5dbd6b27b5f9969fd0eabbd60347e90cf6",
@@ -55,6 +55,6 @@
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
     "updater.py": "e8f59a2de5fda21311dd42a587cc41afe954496431b6db9ac303d57fa6f937c0",
-    "version.json": "31efb6d9d8f62a806bcf2db88d40d6b23f55b9145f17a76b3a118732d2f1d7fc"
+    "version.json": "ece6e4b1f82b097e33549eae3829f7af0f345d2a6e3e692ff768e2c3ceb2149d"
   }
 }
