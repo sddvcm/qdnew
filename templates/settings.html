@@ -48,13 +48,47 @@
     </div>
   </div>
 
+  <div class="section-title" style="margin-top: 26px;">通知推送</div>
+  <div class="help-text" style="margin-bottom: 10px;">
+    配置推送渠道后，在「添加任务 / 编辑任务」页把渠道绑定到任务，签到成功/失败结果就会推送到微信等。
+    渠道只在这里配置一次，多个任务可共用。
+  </div>
+  <div id="notifyList">读取中…</div>
+  <div style="margin-top: 10px;">
+    <button class="btn btn-primary btn-sm" onclick="openNotifyModal()">+ 新增通知渠道</button>
+  </div>
+
   <div class="section-title" style="margin-top: 26px;">历史备份</div>
   <div id="backupList" style="font-size: 12px; color: var(--text-secondary);">读取中…</div>
+</div>
+
+<!-- 通知渠道 编辑弹窗 -->
+<div class="modal-overlay" id="notifyModal" style="display: none;">
+  <div class="modal">
+    <h3 id="notifyModalTitle">新增通知渠道</h3>
+    <input type="hidden" id="notifyEditId" value="">
+    <div class="form-group">
+      <label>渠道类型 <span class="required">*</span></label>
+      <select id="notifyType" onchange="renderNotifyFields()">
+        <option value="">-- 请选择 --</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>备注名称</label>
+      <input type="text" id="notifyName" placeholder="例如：我的微信推送">
+    </div>
+    <div id="notifyFields"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeNotifyModal()">取消</button>
+      <button class="btn btn-primary" id="notifySaveBtn" onclick="saveNotify()">保存</button>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+{% raw %}
 const NEED_RESTART_HINT = '更新已写入，插件已重载。若涉及核心模块（app/、har/）的改动，' +
   '建议重启容器以确保完全生效。';
 
@@ -193,6 +227,176 @@ function downloadManifest() {
                   '&notes=' + encodeURIComponent(n);
 }
 
+// ==================== 通知推送 ====================
+const NOTIFY_TYPES = {
+  pushplus:  { label: 'PushPlus（微信）', fields: [
+    { key: 'token', label: 'Token', required: true,
+      help: '微信需先关注「PushPlus 推送加」公众号并绑定' } ] },
+  serverchan: { label: 'Server酱', fields: [
+    { key: 'sendkey', label: 'SendKey', required: true } ] },
+  bark:      { label: 'Bark（iOS）', fields: [
+    { key: 'device_key', label: 'Device Key', required: true },
+    { key: 'server_url', label: '自建服务器地址（选填）' } ] },
+  dingtalk:  { label: '钉钉机器人', fields: [
+    { key: 'webhook_url', label: 'Webhook 地址', required: true },
+    { key: 'secret', label: '加签 Secret（选填）' } ] },
+  wecom:     { label: '企业微信机器人', fields: [
+    { key: 'webhook_url', label: 'Webhook 地址', required: true } ] },
+  telegram:  { label: 'Telegram Bot', fields: [
+    { key: 'bot_token', label: 'Bot Token', required: true },
+    { key: 'chat_id', label: 'Chat ID', required: true } ] },
+  webhook:   { label: '自定义 Webhook', fields: [
+    { key: 'url', label: 'URL', required: true },
+    { key: 'body_template', label: '正文模板（选填）', type: 'textarea',
+      help: '支持 {{title}} / {{body}} 占位符，默认整包替换',
+      def: '{{title}}\n{{body}}' },
+    { key: 'headers', label: '请求头 JSON（选填）', type: 'textarea',
+      placeholder: '{"Content-Type": "text/plain"}' } ] },
+};
+
+let notifyCache = [];
+
+async function loadNotifies() {
+  const box = document.getElementById('notifyList');
+  try {
+    const r = await fetch('/api/notify');
+    notifyCache = await r.json();
+  } catch(e) { notifyCache = []; }
+  if (!notifyCache.length) {
+    box.innerHTML = '<div class="help-text">尚未配置任何通知渠道。点击下方按钮新增，' +
+      '支持 PushPlus / Server酱 / Bark / 钉钉 / 企业微信 / Telegram / 自定义 Webhook。</div>';
+    return;
+  }
+  box.innerHTML = notifyCache.map(c => {
+    const t = NOTIFY_TYPES[c.notify_type] || { label: c.notify_type };
+    const name = c.name || t.label;
+    return `
+    <div style="display:flex; align-items:center; gap:10px; padding:9px 0;
+                border-bottom:1px solid var(--border-light); font-size:13px;">
+      <label style="font-weight:400; display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" ${c.enabled ? 'checked' : ''}
+          onchange="toggleNotify(${c.id}, this.checked)"> 启用
+      </label>
+      <strong>${esc(name)}</strong>
+      <span style="color:var(--text-muted);">${esc(t.label)}</span>
+      <span style="flex:1;"></span>
+      <button class="btn btn-sm" onclick="testNotify(${c.id})">测试</button>
+      <button class="btn btn-sm" onclick="editNotify(${c.id})">编辑</button>
+      <button class="btn btn-sm btn-danger" onclick="delNotify(${c.id})">删除</button>
+    </div>`;
+  }).join('');
+}
+
+function fillTypeOptions(selected) {
+  const sel = document.getElementById('notifyType');
+  sel.innerHTML = '<option value="">-- 请选择 --</option>' +
+    Object.keys(NOTIFY_TYPES).map(k =>
+      `<option value="${k}" ${k === selected ? 'selected' : ''}>${NOTIFY_TYPES[k].label}</option>`
+    ).join('');
+}
+
+function renderNotifyFields() {
+  const type = document.getElementById('notifyType').value;
+  const box = document.getElementById('notifyFields');
+  if (!type) { box.innerHTML = ''; return; }
+  box.innerHTML = NOTIFY_TYPES[type].fields.map(f => {
+    const cur = notifyCache.find(c => c.id == document.getElementById('notifyEditId').value);
+    const val = (cur && cur.config && cur.config[f.key] !== undefined)
+      ? cur.config[f.key] : (f.def !== undefined ? f.def : '');
+    const req = f.required ? '<span class="required">*</span>' : '';
+    const help = f.help ? `<div class="help-text">${f.help}</div>` : '';
+    if (f.type === 'textarea') {
+      return `<div class="form-group"><label>${f.label} ${req}</label>
+        <textarea id="nf_${f.key}" placeholder="${f.placeholder || ''}">${esc(val)}</textarea>${help}</div>`;
+    }
+    return `<div class="form-group"><label>${f.label} ${req}</label>
+      <input type="text" id="nf_${f.key}" value="${esc(val)}"
+        placeholder="${f.placeholder || ''}">${help}</div>`;
+  }).join('');
+}
+
+function openNotifyModal(id) {
+  const c = notifyCache.find(x => x.id === id);
+  document.getElementById('notifyEditId').value = c ? c.id : '';
+  document.getElementById('notifyModalTitle').textContent = c ? '编辑通知渠道' : '新增通知渠道';
+  document.getElementById('notifyName').value = c ? (c.name || '') : '';
+  fillTypeOptions(c ? c.notify_type : '');
+  renderNotifyFields();
+  document.getElementById('notifyModal').style.display = 'flex';
+}
+
+function closeNotifyModal() {
+  document.getElementById('notifyModal').style.display = 'none';
+}
+
+function editNotify(id) { openNotifyModal(id); }
+
+async function saveNotify() {
+  const id = document.getElementById('notifyEditId').value;
+  const type = document.getElementById('notifyType').value;
+  if (!type) { showToast('error', '请选择渠道类型'); return; }
+  const config = {};
+  for (const f of NOTIFY_TYPES[type].fields) {
+    const el = document.getElementById('nf_' + f.key);
+    let v = el ? el.value.trim() : '';
+    if (f.required && !v) { showToast('error', `请填写 ${f.label}`); return; }
+    if (f.key === 'headers' && v) {
+      try { v = JSON.parse(v); }
+      catch(e) { showToast('error', '请求头不是合法 JSON'); return; }
+    }
+    if (v !== '') config[f.key] = v;
+  }
+  const body = {
+    notify_type: type,
+    name: document.getElementById('notifyName').value.trim(),
+    config: config,
+  };
+  const r = await fetch(id ? `/api/notify/${id}` : '/api/notify', {
+    method: id ? 'PUT' : 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (r.ok) {
+    showToast('success', '已保存');
+    closeNotifyModal();
+    loadNotifies();
+  } else {
+    const d = await r.json().catch(() => ({}));
+    showToast('error', d.error || '保存失败');
+  }
+}
+
+async function delNotify(id) {
+  if (!confirm('确定删除该通知渠道？已绑定它的任务将不再推送。')) return;
+  await fetch(`/api/notify/${id}`, {method: 'DELETE'});
+  showToast('success', '已删除');
+  loadNotifies();
+}
+
+async function toggleNotify(id, enabled) {
+  await fetch(`/api/notify/${id}`, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({enabled: enabled ? 1 : 0}),
+  });
+  loadNotifies();
+}
+
+async function testNotify(id) {
+  const btn = event && event.target;
+  if (btn) { btn.disabled = true; btn.textContent = '发送中…'; }
+  try {
+    const r = await fetch(`/api/notify/${id}/test`, {method: 'POST'});
+    const d = await r.json();
+    if (d.error) { showToast('error', d.error); return; }
+    if (d.ok) showToast('success', '测试消息已发送成功，请查收');
+    else showToast('error', '发送失败：' + (d.detail || '未知原因'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '测试'; }
+  }
+}
+
 loadStatus();
+loadNotifies();
+{% endraw %}
 </script>
 {% endblock %}

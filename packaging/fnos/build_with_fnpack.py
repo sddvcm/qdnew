@@ -168,7 +168,7 @@ def stage_project(version: str) -> str:
     ]
     w = max(len(k) for k, _ in fields)
     # ⚠️ CRLF —— 官方 fnpack 产物实测为 CRLF
-    text = "".join(f"{k.ljust(w)} = {v}\r\n" for k, _ in fields)
+    text = "".join(f"{k.ljust(w)} = {v}\r\n" for k, v in fields)
     with open(os.path.join(SRC, "manifest"), "w", encoding="utf-8", newline="") as f:
         f.write(text)
 

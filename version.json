@@ -1,7 +1,7 @@
 {
   "name": "checkin-system",
-  "version": "1.2.1",
-  "released_at": "2026-09-18",
+  "version": "1.2.2",
+  "released_at": "2026-09-19",
   "min_python": "3.10",
-  "notes": "修正 Docker 部署配置：新增 .dockerignore（防止 .env/data 烤进镜像）、改单卷挂载、加 .env.example 模板与飞牛 NAS 部署文档"
+  "notes": "补全通知推送前端界面：系统设置页新增「通知推送」渠道管理（新增/编辑/删除/启停/测试发送，7 渠道动态表单），任务表单新增「消息推送」绑定区（成功/失败时机），通知 API 新增测试发送端点"
 }

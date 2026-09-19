@@ -1,6 +1,9 @@
 """通知配置 API"""
+import json
+
 from flask import Blueprint, request, jsonify
 from app.models import NotifyModel
+from app import notifier
 
 bp = Blueprint("notify_api", __name__)
 
@@ -31,6 +34,28 @@ def update_notify(nid):
 def delete_notify(nid):
     NotifyModel.delete(nid)
     return jsonify({"success": True})
+
+
+@bp.route("/<int:nid>/test", methods=["POST"])
+def test_notify(nid):
+    """向该渠道发一条测试消息，验证配置是否有效（不看 HTTP 状态码，看响应体）。"""
+    cfg = next((c for c in NotifyModel.get_all() if c["id"] == nid), None)
+    if not cfg:
+        return jsonify({"error": "通知配置不存在"}), 404
+    cfg_data = cfg.get("config") or {}
+    if isinstance(cfg_data, str):
+        try:
+            cfg_data = json.loads(cfg_data)
+        except (json.JSONDecodeError, TypeError):
+            cfg_data = {}
+    try:
+        ok, detail = notifier._dispatch(
+            cfg["notify_type"], cfg_data,
+            "[测试] 签到管理系统",
+            "这是一条测试推送，收到即说明该渠道配置有效。")
+    except Exception as e:
+        ok, detail = False, f"异常: {e}"
+    return jsonify({"ok": ok, "detail": detail})
 
 
 @bp.route("/task/<int:task_id>", methods=["GET"])

@@ -87,6 +87,18 @@
 
     <div id="dynamicFields"></div>
 
+    <div class="section-title">消息推送（可选）</div>
+    <div class="form-group">
+      <div id="notifyBinding" class="help-text">读取通知渠道中…</div>
+      <div style="display:flex; gap:18px; margin-top:8px; font-size:13px;">
+        <label style="font-weight:400;"><input type="checkbox" id="notifyOnSuccess" checked> 成功时推送</label>
+        <label style="font-weight:400;"><input type="checkbox" id="notifyOnFailure" checked> 失败时推送</label>
+      </div>
+      <div class="help-text">
+        没有可选渠道？去 <a href="/settings">系统设置 → 通知推送</a> 新增（如 PushPlus 微信推送）。
+      </div>
+    </div>
+
     <div class="modal-actions">
       <a href="/" class="btn">取消</a>
       <button type="submit" class="btn btn-primary">
@@ -116,7 +128,49 @@ document.addEventListener('DOMContentLoaded', () => {
   if (isEdit && taskData) {
     loadPluginSchema();
   }
+  loadNotifyBinding();
 });
+
+// ==================== 消息推送绑定 ====================
+const NOTIFY_LABELS = {
+  pushplus: 'PushPlus（微信）', serverchan: 'Server酱', bark: 'Bark（iOS）',
+  dingtalk: '钉钉机器人', wecom: '企业微信机器人', telegram: 'Telegram Bot',
+  webhook: '自定义 Webhook',
+};
+
+async function loadNotifyBinding() {
+  const box = document.getElementById('notifyBinding');
+  let channels = [];
+  try {
+    const r = await fetch('/api/notify');
+    channels = await r.json();
+  } catch(e) {}
+  if (!channels.length) {
+    box.textContent = '尚未配置通知渠道，可跳过。';
+    return;
+  }
+  let bound = {};
+  if (isEdit && taskData) {
+    try {
+      const r = await fetch(`/api/notify/task/${taskData.id}`);
+      (await r.json()).forEach(b => {
+        bound[b.id] = { on_success: b.on_success, on_failure: b.on_failure };
+      });
+      if (Object.keys(bound).length) {
+        // 任一绑定渠道带时机标记时，同步到全局两个开关
+        const first = Object.values(bound)[0];
+        document.getElementById('notifyOnSuccess').checked = !!first.on_success;
+        document.getElementById('notifyOnFailure').checked = !!first.on_failure;
+      }
+    } catch(e) {}
+  }
+  box.innerHTML = channels.map(c => `
+    <label style="font-weight:400; display:flex; align-items:center; gap:6px; padding:3px 0;">
+      <input type="checkbox" class="notify-check" value="${c.id}" ${bound[c.id] ? 'checked' : ''}>
+      ${c.name || (NOTIFY_LABELS[c.notify_type] || c.notify_type)}
+      <span style="color:var(--text-muted); font-size:11px;">${NOTIFY_LABELS[c.notify_type] || c.notify_type}</span>
+    </label>`).join('');
+}
 
 async function loadPluginSchema() {
   const pluginId = document.getElementById('pluginSelect').value;
@@ -233,6 +287,21 @@ document.getElementById('taskForm').addEventListener('submit', async function(e)
     });
 
     if (resp.ok) {
+      const saved = await resp.json();
+      // 绑定通知渠道（新建任务时 resp 才有 id）
+      const notifyIds = Array.from(
+        document.querySelectorAll('.notify-check:checked')).map(el => parseInt(el.value));
+      try {
+        await fetch(`/api/notify/task/${saved.id}`, {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            notify_ids: notifyIds,
+            on_success: document.getElementById('notifyOnSuccess').checked,
+            on_failure: document.getElementById('notifyOnFailure').checked,
+          }),
+        });
+      } catch(e2) { /* 绑定失败不阻塞任务保存 */ }
       showToast('success', isEdit ? '任务已更新' : '任务创建成功');
       setTimeout(() => location.href = '/', 800);
     } else {
