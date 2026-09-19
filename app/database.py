@@ -20,7 +20,16 @@ def get_db():
 
 
 def init_db():
-    os.makedirs(DB_DIR, exist_ok=True)
+    # ⚠️ 建数据目录失败**不能让进程崩**：fpk 装机后 CHECKIN_DATA_DIR 指向
+    # 共享目录，若该目录不可写（ACL 没授权、只读挂载等），makedirs 抛异常
+    # 会让应用"启动即退出"，用户只看到一句"启动失败"毫无头绪（踩过）。
+    # 这里显式捕获，打印清晰原因；目录真不可用时 get_db() 会给出更具体的错误。
+    try:
+        os.makedirs(DB_DIR, exist_ok=True)
+    except OSError as e:
+        print(f"[database] 无法创建数据目录 {DB_DIR}：{e}\n"
+              f"[database] 请检查该目录是否可写（fpk 模式下应为 fnOS 分配的"
+              f"共享目录 DATA_SHARE_PATH）。", flush=True)
     conn = get_db()
     cursor = conn.cursor()
 

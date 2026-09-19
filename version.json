@@ -1,7 +1,7 @@
 {
   "name": "checkin-system",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "released_at": "2026-09-19",
   "min_python": "3.10",
-  "notes": "用户数据（数据库/备份/插件/导出文件）迁移到安装卷的 @appshare/checkin-system/ 下，飞牛文件管理里可直接找到；升级后首次启动自动搬家；设置页同时显示运行版本与安装包版本（应用中心显示安装包版本，重装才会变）"
+  "notes": "修复 1.5.7 启动失败：改用飞牛官方 data-share 机制（config/resource 声明共享目录，系统自动创建并授权，路径从 TRIM_DATA_SHARE_PATHS 读取），并对数据目录做可写性探测——共享目录不可用时自动回退私有目录，绝不让应用因目录不可写而启动失败"
 }

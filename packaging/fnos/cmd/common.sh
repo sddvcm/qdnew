@@ -17,28 +17,63 @@ RUNTIME_TAR="${APP_DIR}/runtime.tar"
 PY_BIN="${RUNTIME_DIR}/bin/python3"
 DEFAULT_PORT=5800
 
-# ---- 用户可见的数据目录（@appshare）----
-# TRIM_PKGVAR 指向 @appdata（应用私有数据，文件管理器里看不到）。
-# 用户要求把数据库/备份/插件/导出文件放到同卷的 @appshare/<应用名> 下，
-# 这样在飞牛文件管理里能直接找到、随时备份。
-# ⚠️ 卷名从 TRIM_PKGVAR 推导，**绝不写死 /vol1** —— 应用装在哪个卷就落在哪个卷
-#    （含 root 安装到系统盘 /usr/local/apps 的情况）。
-case "${TRIM_PKGVAR}" in
-    */@appdata/*)
-        SHARE_VOL="${TRIM_PKGVAR%%/@appdata*}"          # 如 /vol1
-        SHARE_ROOT="${SHARE_VOL}/@appshare/${APP_NAME}"
-        ;;
-    /usr/local/apps/@appdata/*)
-        SHARE_ROOT="/usr/local/apps/@appshare/${APP_NAME}"
-        ;;
-    *)
-        # 未知布局：不猜，回退到 var（老行为），保证能跑
-        SHARE_ROOT="${VAR_DIR}"
-        ;;
-esac
+# ---- 用户可见的数据目录（官方 data-share 机制）----
+# TRIM_PKGVAR 指向 @appdata（应用私有，文件管理器看不到）。
+# 要让用户能在「文件管理」里直接找到数据库/备份/插件/导出文件，飞牛的
+# **正规做法**是在 `config/resource` 里声明 data-share：
+#
+#     {"data-share": {"shares": [{"name": "checkin-system"}]}}
+#
+# 安装时 fnOS 会自动创建该共享目录（Windows ACL 权限模型）、并给应用运行用户
+# 授予访问权限，然后通过环境变量把路径告诉应用：
+#
+#     TRIM_DATA_SHARE_PATHS=/vol1/@appshare/checkin-system[:更多路径]
+#
+# ⚠️ 早期版本我们自己拼 @appshare 路径并 mkdir —— 那是错的：
+#    ①用户安装的应用默认没有建共享目录的权限，mkdir 必然失败；
+#    ②即使建出来也没有 ACL 授权，应用写不进去；
+#    ③结果 CHECKIN_DATA_DIR 指向不可写目录 → 建库失败 → 进程启动即崩。
+#    现在改成官方机制 + 可写性探测兜底，两条腿走路。
+#
+# 兼容性：多路径用 ":" 分隔，取第一个（官方示例也是 `${VAR%%:*}`）。
+if [ -n "${TRIM_DATA_SHARE_PATHS:-}" ]; then
+    SHARE_ROOT="${TRIM_DATA_SHARE_PATHS%%:*}"
+elif [ -n "${wizard_share_path:-}" ]; then          # 安装向导传进来的（若有）
+    SHARE_ROOT="${wizard_share_path}"
+else
+    SHARE_ROOT=""                                   # 交给 ensure_data_dir 探测
+fi
 
-DATA_DIR="${SHARE_ROOT}/data"
-USER_PLUGINS_DIR="${SHARE_ROOT}/user_plugins"
+# 兜底数据目录：@appdata（老行为）。共享目录不可用时回退到这里 ——
+# **宁可数据放私有目录，也不能让应用起不来**。
+FALLBACK_ROOT="${VAR_DIR}"
+
+# 探测并落定最终数据目录。
+# 判定标准很简单：**能不能真的写进去**。光看目录存在不够（可能是只读挂载
+# 或 ACL 没授权），所以实际写一个探针文件。
+# 结果写入全局 DATA_ROOT，并导出 CHECKIN_DATA_DIR 供 Python 侧使用。
+DATA_ROOT=""
+ensure_data_dir() {
+    local cand probe
+    for cand in "${SHARE_ROOT}" "${FALLBACK_ROOT}"; do
+        [ -n "$cand" ] || continue
+        if mkdir -p "$cand/data" 2>/dev/null; then
+            probe="${cand}/data/.write_probe_$$"
+            if (echo ok > "$probe") 2>/dev/null; then
+                rm -f "$probe" 2>/dev/null
+                DATA_ROOT="$cand"
+                break
+            fi
+        fi
+    done
+    # 两个都不行：退回 VAR_DIR，让后续步骤自己报错（至少错误信息明确）
+    [ -n "$DATA_ROOT" ] || DATA_ROOT="${FALLBACK_ROOT}"
+    export DATA_ROOT
+}
+
+ensure_data_dir
+DATA_DIR="${DATA_ROOT}/data"
+USER_PLUGINS_DIR="${DATA_ROOT}/user_plugins"
 BACKUP_DIR="${DATA_DIR}/backups"          # 与 updater.py 的 DATA_DIR/backups 一致
 
 log_msg() {
@@ -49,59 +84,41 @@ log_msg() {
 # 初始化目录结构（幂等，安装/升级/启动都可重复调用）
 ensure_dirs() {
     mkdir -p "$LOG_DIR" "$DATA_DIR" "$USER_PLUGINS_DIR" "$BACKUP_DIR" \
-             "$ETC_DIR" "$SHARE_ROOT" 2>/dev/null
+             "$ETC_DIR" 2>/dev/null
 }
 
-# 一次性迁移：把历史版本落在 @appdata（TRIM_PKGVAR）下的用户数据搬到 @appshare。
-# 幂等；目标已有同名项时**不覆盖**（保新数据），只搬缺的。
-# 在 start / install_callback / upgrade_callback 里都会被调用 ——
-# 对已装 1.5.x 的机器，升级后第一次启动即完成搬家，无需手工操作。
-#
-# ⚠️ 两个坑（实测踩过）：
-# 1. `mv src dst` 当 dst 存在时会把 src **塞进 dst 里面**（变成 dst/src），
-#    不是合并。所以 dst 为空时要先 rmdir 再 mv。
-# 2. ensure_dirs 会先建好空的 $DATA_DIR/backups —— 若只判断"dst 非空就跳过"，
-#    这个脚手架空目录会让迁移永远被跳过。空目标必须当"不存在"处理。
+# 把历史版本落在 @appdata（VAR_DIR）下的用户数据搬到当前 DATA_ROOT。
+# 仅当两者不同（即共享目录可用）时才做；幂等；目标已有同名项不覆盖。
 migrate_legacy_data() {
     local item src dst base moved skipped
+    [ "$DATA_ROOT" = "$VAR_DIR" ] && return 0      # 已在私有目录，无需迁移
     for item in data user_plugins backups; do
         src="${VAR_DIR}/${item}"
-        dst="${SHARE_ROOT}/${item}"
+        dst="${DATA_ROOT}/${item}"
         [ -d "$src" ] || continue
         mkdir -p "$dst" 2>/dev/null
 
-        if [ ! -n "$(ls -A "$dst" 2>/dev/null)" ]; then
-            # 目标为空（可能只是脚手架）：删掉空壳后整体搬
-            rmdir "$dst" 2>/dev/null
+        if [ -z "$(ls -A "$dst" 2>/dev/null)" ]; then
+            rmdir "$dst" 2>/dev/null      # 空壳先删，否则 mv 会把 src 塞进 dst 里
             if mv "$src" "$dst" 2>/dev/null; then
                 log_msg "migrate: ${src} -> ${dst}"
+            elif cp -ap "$src/." "$dst/" 2>/dev/null; then
+                log_msg "migrate: 复制 ${src} -> ${dst}（跨设备回退）"
             else
-                # mv 失败（跨设备等）：退回复制
-                if cp -ap "$src/." "$dst/" 2>/dev/null; then
-                    log_msg "migrate: 复制 ${src} -> ${dst}（跨设备回退）"
-                else
-                    log_msg "migrate: 迁移 ${src} 失败，保留原位置继续"
-                fi
+                log_msg "migrate: 迁移 ${src} 失败，保留原位置继续"
             fi
         else
-            # 目标非空：逐项合并，已存在的同名项跳过（不覆盖新数据）
-            moved=0
-            skipped=0
+            moved=0; skipped=0
             for f in "$src"/.??* "$src"/*; do
                 [ -e "$f" ] || continue
                 base=$(basename "$f")
                 if [ -e "$dst/$base" ]; then
-                    skipped=$((skipped + 1))
-                    continue
+                    skipped=$((skipped + 1)); continue
                 fi
-                if mv "$f" "$dst/" 2>/dev/null; then
-                    moved=$((moved + 1))
-                fi
+                mv "$f" "$dst/" 2>/dev/null && moved=$((moved + 1))
             done
-            log_msg "migrate: ${item} 合并完成（移入 ${moved} 项，跳过已存在 ${skipped} 项）"
+            log_msg "migrate: ${item} 合并完成（移入 ${moved}，跳过已存在 ${skipped}）"
         fi
-
-        # 源目录搬空了就清理掉
         [ -d "$src" ] && [ -z "$(ls -A "$src" 2>/dev/null)" ] && rmdir "$src" 2>/dev/null
     done
 }

@@ -1,11 +1,11 @@
 {
   "name": "checkin-system",
-  "version": "1.5.7",
+  "version": "1.5.8",
   "released_at": "2026-09-19",
-  "notes": "用户数据（数据库/备份/插件/导出文件）迁移到安装卷的 @appshare/checkin-system/ 下，飞牛文件管理里可直接找到；升级后首次启动自动搬家；设置页同时显示运行版本与安装包版本（应用中心显示安装包版本，重装才会变）",
+  "notes": "修复 1.5.7 启动失败：改用飞牛官方 data-share 机制（config/resource 声明共享目录，系统自动创建并授权，路径从 TRIM_DATA_SHARE_PATHS 读取），并对数据目录做可写性探测——共享目录不可用时自动回退私有目录，绝不让应用因目录不可写而启动失败",
   "files": {
     "app/crypto.py": "669104cd677979c8ce176646b3cf3ae9a7f0224fc53efb0e2263b20d0fb99530",
-    "app/database.py": "5f6349210f7fd5be3908ba252eb49a444d277be0b68e002bb1b97bebccf9b1df",
+    "app/database.py": "3be5458f97c1874ce3c7a20330adb15d7660bf42d40fdc39460c55920492a10e",
     "app/engine.py": "3d95ee4e150ba4cc6b35637e7a49e6ec78c5bae4769b80e9009395e6161b34ef",
     "app/extras.py": "cfd2b9c9ced273f2bdfdd684d6289d349079c26ebcc861de01ac28cc0ebb3c4d",
     "app/main.py": "994ec9e3ff76f4e711a530f0de46f7c199cfc986464db089d49da587e2054596",
@@ -55,6 +55,6 @@
     "captcha.py": "22f0d0b32b9a7d98586abfc7121cea4f9bf3bb2aec16757bead80c2ed1990a70",
     "requirements.txt": "ff0608f9e7d6b322c0f8a469dfa6d227c2f391eddd06e38cfab91aac8ffe6bc6",
     "updater.py": "e8f59a2de5fda21311dd42a587cc41afe954496431b6db9ac303d57fa6f937c0",
-    "version.json": "ece6e4b1f82b097e33549eae3829f7af0f345d2a6e3e692ff768e2c3ceb2149d"
+    "version.json": "05bd5b01d9c9acf98ce78aa27e099fd63cb0ff8801fd5d5fa8aa70d75e8a12e8"
   }
 }

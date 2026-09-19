@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/common.sh"
 
 start_app() {
     ensure_dirs
-    # 老版本数据在 @appdata 下 —— 升级后首次启动搬去 @appshare（幂等）
+    # 老版本数据在私有目录 —— 若共享目录可用则搬过去（幂等）
     migrate_legacy_data
     if is_running; then
         log_msg "start: 已在运行"
@@ -23,6 +23,8 @@ start_app() {
 
     load_env_file
 
+    # 明确记录数据落点，便于排查"数据在哪"
+    log_msg "start: 数据目录=$DATA_ROOT（共享=${TRIM_DATA_SHARE_PATHS:-无}）"
     log_msg "start: 启动 (port=${APP_PORT:-$DEFAULT_PORT})"
     cd "$APP_DIR" || return 1
     PORT="${APP_PORT:-$DEFAULT_PORT}" \
